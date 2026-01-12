@@ -1,4 +1,6 @@
-plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "0.8.0"
-}
 rootProject.name = "EOrm"
+include("eorm-core")
+include("eorm-dialect-mysql")
+include("eorm-dialect-postgres")
+include("eorm-dialect-sqlite")
+include("eorm-dialect-h2")
