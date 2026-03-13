@@ -1,5 +1,6 @@
 package top.e404.eorm
 
+import kotlinx.coroutines.withContext
 import top.e404.eorm.dialect.SqlDialect
 import top.e404.eorm.dsl.DeleteBuilder
 import top.e404.eorm.dsl.Query
@@ -15,6 +16,8 @@ import top.e404.eorm.log.EOrmLogger
 import top.e404.eorm.mapping.CamelToSnakeConverter
 import top.e404.eorm.mapping.NameConverter
 import top.e404.eorm.meta.MetaCache
+import top.e404.eorm.transaction.CoroutineTransaction
+import top.e404.eorm.transaction.TransactionManager
 import top.e404.eorm.validation.EntityValidator
 import java.lang.reflect.Field
 import javax.sql.DataSource
@@ -27,7 +30,80 @@ class EOrm(
     val useLiterals: Boolean = false,
     val dataFiller: DataFiller = NoOpDataFiller()
 ) {
-    val executor = SqlExecutor(dataSource, logger, useLiterals)
+    val transactionManager = TransactionManager(dataSource)
+    val executor = SqlExecutor(dataSource, logger, useLiterals, transactionManager)
+
+    // ==================== 事务 API ====================
+
+    /**
+     * 编程式事务（普通线程），自动 commit/rollback。
+     *
+     * ```kotlin
+     * db.transaction {
+     *     insert(user)
+     *     update<User>().set(User::age, 21).where { eq(User::id, user.id) }.exec()
+     * }
+     * ```
+     */
+    fun <T> transaction(block: EOrm.() -> T): T {
+        transactionManager.begin()
+        return try {
+            val result = this.block()
+            transactionManager.commit()
+            result
+        } catch (e: Exception) {
+            transactionManager.rollback()
+            throw e
+        }
+    }
+
+    /**
+     * 协程事务，在 CoroutineContext 中绑定事务连接。
+     * 协程切换线程时通过 [CoroutineTransaction] 自动维护 ThreadLocal。
+     *
+     * ```kotlin
+     * db.suspendTransaction {
+     *     insert(user)
+     *     // 即使协程切换线程，事务连接也会正确跟随
+     * }
+     * ```
+     */
+    suspend fun <T> suspendTransaction(block: suspend EOrm.() -> T): T {
+        val conn = dataSource.connection
+        conn.autoCommit = false
+        val element = CoroutineTransaction(transactionManager, conn)
+        return try {
+            val result = withContext(element) {
+                this@EOrm.block()
+            }
+            conn.commit()
+            result
+        } catch (e: Exception) {
+            try { conn.rollback() } catch (_: Exception) {}
+            throw e
+        } finally {
+            try { conn.autoCommit = true } catch (_: Exception) {}
+            conn.close()
+        }
+    }
+
+    /**
+     * 手动开启事务（仅普通线程）。
+     * 推荐使用 [transaction] 自动管理。
+     */
+    fun beginTransaction() = transactionManager.begin()
+
+    /**
+     * 手动提交事务（仅普通线程）。
+     */
+    fun commitTransaction() = transactionManager.commit()
+
+    /**
+     * 手动回滚事务（仅普通线程）。
+     */
+    fun rollbackTransaction() = transactionManager.rollback()
+
+    // ==================== CRUD ====================
 
     fun <T : Any> insert(entity: T) = insert(listOf(entity))
 
@@ -128,6 +204,8 @@ class EOrm(
         else -> false
     }
 
+    // ==================== DDL ====================
+
     fun generateDdl(clazz: Class<*>): String {
         val meta = MetaCache.get(clazz, nameConverter)
         val sb = StringBuilder()
@@ -149,6 +227,8 @@ class EOrm(
 
     fun createTable(clazz: Class<*>) = executor.execute(generateDdl(clazz))
     inline fun <reified T> createTable() = createTable(T::class.java)
+
+    // ==================== DSL 入口 ====================
 
     fun <T> from(clazz: Class<T>, alias: String): Query<T> = Query(this, clazz, alias)
     inline fun <reified T> from(alias: String): Query<T> = Query(this, T::class.java, alias)

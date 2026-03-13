@@ -4,7 +4,9 @@ import top.e404.eorm.log.EOrmLogger
 import top.e404.eorm.log.DefaultSqlFormatter
 import top.e404.eorm.meta.MetaCache
 import top.e404.eorm.mapping.NameConverter
+import top.e404.eorm.transaction.TransactionManager
 import java.lang.reflect.Field
+import java.sql.Connection
 import java.sql.Statement
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -17,18 +19,33 @@ import java.time.format.DateTimeFormatter
 class SqlExecutor(
     private val dataSource: DataSource,
     private val logger: EOrmLogger,
-    private val useLiterals: Boolean
+    private val useLiterals: Boolean,
+    private val transactionManager: TransactionManager
 ) {
+    /**
+     * 获取连接并执行操作。
+     * 事务中复用绑定的连接（不关闭），非事务中获取新连接并自动关闭。
+     */
+    private inline fun <R> withConnection(block: (Connection) -> R): R {
+        val inTx = transactionManager.isInTransaction()
+        val conn = transactionManager.getConnection()
+        return try {
+            block(conn)
+        } finally {
+            if (!inTx) conn.close()
+        }
+    }
+
     fun execute(sql: String) {
         logger.logSql(sql)
-        dataSource.connection.use { conn -> conn.createStatement().use { stmt -> stmt.execute(sql) } }
+        withConnection { conn -> conn.createStatement().use { stmt -> stmt.execute(sql) } }
     }
 
     fun <T> executeBatchInsert(sqlTemplate: String, paramsList: List<List<Any?>>, entities: List<T>, idField: Field?) {
         try {
             if (useLiterals) {
                 logger.info("Batch Insert (Literal Mode) Size: ${paramsList.size}")
-                dataSource.connection.use { conn ->
+                withConnection { conn ->
                     conn.createStatement().use { stmt ->
                         paramsList.forEach { params ->
                             val finalSql = DefaultSqlFormatter.format(sqlTemplate, params)
@@ -39,8 +56,8 @@ class SqlExecutor(
                     }
                 }
             } else {
-                if (paramsList.isNotEmpty()) logger.logSql(sqlTemplate, paramsList[0]) // Only log first batch or template? Better log template + sample params
-                dataSource.connection.use { conn ->
+                if (paramsList.isNotEmpty()) logger.logSql(sqlTemplate, paramsList[0])
+                withConnection { conn ->
                     conn.prepareStatement(sqlTemplate, Statement.RETURN_GENERATED_KEYS).use { stmt ->
                         val batchSize = 100
                         for ((i, params) in paramsList.withIndex()) {
@@ -70,12 +87,10 @@ class SqlExecutor(
         }
     }
 
-
-
     fun <T> query(sql: String, params: List<Any?>, clazz: Class<T>, converter: NameConverter): List<T> {
         logger.logSql(sql, params)
         val list = ArrayList<T>()
-        dataSource.connection.use { conn ->
+        withConnection { conn ->
             if (useLiterals) {
                 conn.createStatement().use { stmt -> stmt.executeQuery(sql).use { rs -> mapResult(rs, clazz, list, converter) } }
             } else {
@@ -91,7 +106,7 @@ class SqlExecutor(
     fun queryMap(sql: String, params: List<Any?>): List<Map<String, Any?>> {
         logger.logSql(sql, params)
         val list = ArrayList<Map<String, Any?>>()
-        dataSource.connection.use { conn ->
+        withConnection { conn ->
             if (useLiterals) {
                 conn.createStatement().use { stmt -> stmt.executeQuery(sql).use { rs -> mapResultMap(rs, list) } }
             } else {
@@ -106,7 +121,7 @@ class SqlExecutor(
 
     fun executeUpdate(sql: String, params: List<Any?>): Int {
         logger.logSql(sql, params)
-        return dataSource.connection.use { conn ->
+        return withConnection { conn ->
             if (useLiterals) {
                 val finalSql = DefaultSqlFormatter.format(sql, params)
                 conn.createStatement().use { it.executeUpdate(finalSql) }

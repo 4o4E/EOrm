@@ -290,13 +290,53 @@ object MyConverter : NameConverter {
 val db = EOrm(dataSource, MysqlDialect(), nameConverter = MyConverter)
 ```
 
+### 7. 事务支持
+
+支持普通线程和协程两种事务模式。
+
+#### 编程式事务（推荐）
+
+```kotlin
+db.transaction {
+    val user = User(name = "Alice", age = 20)
+    insert(user)
+    update<User>().set(User::age, 21).where { eq(User::id, user.id) }.exec()
+    // 异常自动回滚，正常结束自动提交
+}
+```
+
+#### 协程事务
+
+协程切换线程时事务连接会自动跟随，通过 `CoroutineContext` 维护。
+
+```kotlin
+suspend fun createUser() {
+    db.suspendTransaction {
+        insert(User(name = "Bob", age = 25))
+        withContext(Dispatchers.IO) {
+            insert(User(name = "Charlie", age = 30)) // 切换线程后事务仍有效
+        }
+    }
+}
+```
+
+#### 手动事务（高级用法）
+
+```kotlin
+db.beginTransaction()
+try {
+    db.insert(user1)
+    db.insert(user2)
+    db.commitTransaction()
+} catch (e: Exception) {
+    db.rollbackTransaction()
+    throw e
+}
+```
+
 ## 📦 支持数据库
 
 - MySQL
 - PostgreSQL
 - SQLite
 - H2
-
-## ⚠️ 当前限制
-
-- 暂不支持事务管理。每次操作独立获取连接并自动关闭，批量插入在单个连接内完成。如需事务支持，请直接通过 `DataSource` 获取连接手动管理。
