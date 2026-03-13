@@ -3,6 +3,7 @@ package top.e404.eorm
 import top.e404.eorm.dialect.SqlDialect
 import top.e404.eorm.dsl.DeleteBuilder
 import top.e404.eorm.dsl.Query
+import top.e404.eorm.dsl.SubQuery
 import top.e404.eorm.dsl.UpdateBuilder
 import top.e404.eorm.executor.SqlExecutor
 import top.e404.eorm.filler.DataFiller
@@ -157,4 +158,7 @@ class EOrm(
 
     fun <T> delete(clazz: Class<T>): DeleteBuilder<T> = DeleteBuilder(this, clazz)
     inline fun <reified T> delete(): DeleteBuilder<T> = DeleteBuilder(this, T::class.java)
+
+    fun <T> subQuery(clazz: Class<T>, alias: String): SubQuery<T> = SubQuery(this, clazz, alias)
+    inline fun <reified T> subQuery(alias: String): SubQuery<T> = SubQuery(this, T::class.java, alias)
 }
