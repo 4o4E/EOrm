@@ -49,10 +49,25 @@ interface SqlDialect {
      * @return 带分页的 SQL
      */
     fun buildPaginationSql(sql: String, offset: Long, limit: Long): String
+
+    /**
+     * 构建带 LIMIT 的查询 SQL（不含偏移量）。
+     * @param sql 原始查询 SQL
+     * @param limit 最大返回行数
+     * @return 带 LIMIT 的 SQL
+     */
+    fun buildLimitSql(sql: String, limit: Int): String
+
+    /**
+     * 是否支持 `CREATE TABLE IF NOT EXISTS` 语法。
+     * @return 支持返回 true，不支持返回 false
+     */
+    fun supportsIfNotExists(): Boolean
 }
 
 /**
- * SQL 方言基类，提供 [valueToSql] 和 [buildPaginationSql] 的通用实现。
+ * SQL 方言基类，提供通用默认实现。
+ * 默认分页语法使用 SQL 标准的 `LIMIT n OFFSET m`。
  */
 abstract class BaseDialect : SqlDialect {
     override fun valueToSql(value: Any?): String {
@@ -69,6 +84,12 @@ abstract class BaseDialect : SqlDialect {
     }
 
     override fun buildPaginationSql(sql: String, offset: Long, limit: Long): String {
-        return "$sql LIMIT $offset, $limit"
+        return "$sql LIMIT $limit OFFSET $offset"
     }
+
+    override fun buildLimitSql(sql: String, limit: Int): String {
+        return "$sql LIMIT $limit"
+    }
+
+    override fun supportsIfNotExists(): Boolean = true
 }

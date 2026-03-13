@@ -256,7 +256,8 @@ class EOrm(
         val meta = MetaCache.get(clazz, nameConverter)
         val sb = StringBuilder()
         val tableName = dialect.wrapName(meta.tableName)
-        sb.append("CREATE TABLE IF NOT EXISTS $tableName (\n")
+        val ifNotExists = if (dialect.supportsIfNotExists()) "IF NOT EXISTS " else ""
+        sb.append("CREATE TABLE $ifNotExists$tableName (\n")
         val definitions = ArrayList<String>()
         for (colMeta in meta.columnMetas) {
             val colName = dialect.wrapName(colMeta.columnName)

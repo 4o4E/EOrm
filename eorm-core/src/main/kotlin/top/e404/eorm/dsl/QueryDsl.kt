@@ -424,19 +424,21 @@ class ConditionBuilder(
             
             val cols = if (selections.isEmpty()) "*" else selections.joinToString(", ") { it.toSql(eOrm, aliasResolver) }
             
-            val sb = StringBuilder("SELECT $cols FROM $tableStr")
-            joins.forEach { sb.append(" ").append(it) }
-            if (whereBuilder.sqlParts.isNotEmpty()) sb.append(" WHERE ").append(whereBuilder.sqlParts)
+            var sql = StringBuilder("SELECT $cols FROM $tableStr")
+            joins.forEach { sql.append(" ").append(it) }
+            if (whereBuilder.sqlParts.isNotEmpty()) sql.append(" WHERE ").append(whereBuilder.sqlParts)
             
-            if (applyLimit && limit != null) {
-                sb.append(" LIMIT $limit")
+            val baseSql = if (applyLimit && limit != null) {
+                eOrm.dialect.buildLimitSql(sql.toString(), limit!!)
+            } else {
+                sql.toString()
             }
             
             val finalParams = ArrayList<Any?>()
             finalParams.addAll(joinParams)
             finalParams.addAll(whereBuilder.params)
             
-            return Pair(sb.toString(), finalParams)
+            return Pair(baseSql, finalParams)
         }
 
         private fun buildSql(): Pair<String, List<Any?>> = buildSelectSql(true)
