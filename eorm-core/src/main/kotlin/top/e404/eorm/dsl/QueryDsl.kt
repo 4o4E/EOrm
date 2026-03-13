@@ -7,6 +7,18 @@ import top.e404.eorm.meta.MetaCache
 import top.e404.eorm.Page
 import kotlin.reflect.KProperty1
 
+/**
+ * SQL 条件构建器，用于构建 WHERE/ON 子句中的条件表达式。
+ *
+ * 支持基础比较（eq/gt/lt 等）、嵌套条件（nest/and/or）、子查询条件（IN/EXISTS 等），
+ * 并自动处理条件之间的 AND/OR 连接符。
+ *
+ * @param dialect SQL 方言
+ * @param aliasResolver 类到表别名的解析器
+ * @param useLiterals 是否将参数直接拼接到 SQL 中
+ * @param nameConverter 属性名到列名的转换器
+ * @param outerAliasMap 外层查询的别名映射，用于子查询引用外层表列
+ */
 class ConditionBuilder(
     private val dialect: SqlDialect,
     private val aliasResolver: (Class<*>) -> String?,
@@ -246,6 +258,16 @@ class ConditionBuilder(
         }
     }
 
+/**
+ * DSL 查询构建器，用于构建 SELECT 查询语句。
+ *
+ * 支持列选择、JOIN、WHERE 条件、LIMIT 和分页查询，查询结果可映射为实体对象、其他类型或 Map。
+ *
+ * @param T 主查询实体类型
+ * @param eOrm EOrm 实例
+ * @param clazz 实体类的 Class 对象
+ * @param alias 主表别名
+ */
     class Query<T>(
         private val eOrm: EOrm,
         private val clazz: Class<T>,
@@ -261,16 +283,37 @@ class ConditionBuilder(
 
         init { aliasMap[clazz] = alias }
 
+        /**
+         * 指定查询的列（字符串形式）。
+         *
+         * @param cols 列名或 SQL 表达式
+         * @return 当前查询构建器
+         */
         fun select(vararg cols: String): Query<T> {
             cols.forEach { selections.add(StringSelection(it)) }
             return this
         }
         
+        /**
+         * 指定查询的列（属性引用形式），自动解析列名和表别名。
+         *
+         * @param props 实体属性引用
+         * @return 当前查询构建器
+         */
         fun select(vararg props: KProperty1<*, *>): Query<T> {
             props.forEach { selections.add(PropertySelection(it)) }
             return this
         }
 
+        /**
+         * 添加 JOIN 子句。
+         *
+         * @param target 要连接的实体类
+         * @param alias 连接表的别名
+         * @param type 连接类型（INNER/LEFT/RIGHT）
+         * @param onClause ON 条件构建回调
+         * @return 当前查询构建器
+         */
         fun join(target: Class<*>, alias: String, type: String = "INNER", onClause: ClauseConsumer): Query<T> {
             aliasMap[target] = alias
             val meta = MetaCache.get(target, eOrm.nameConverter)
@@ -284,18 +327,50 @@ class ConditionBuilder(
             return this
         }
 
+        /** 添加 LEFT JOIN 子句。 */
         inline fun <reified J> leftJoin(alias: String, noinline onClause: ConditionBuilder.() -> Unit): Query<T> = join(J::class.java, alias, "LEFT") { b -> b.onClause() }
+
+        /** 添加 INNER JOIN 子句。 */
         inline fun <reified J> innerJoin(alias: String, noinline onClause: ConditionBuilder.() -> Unit): Query<T> = join(J::class.java, alias, "INNER") { b -> b.onClause() }
+
+        /** 添加 RIGHT JOIN 子句。 */
         inline fun <reified J> rightJoin(alias: String, noinline onClause: ConditionBuilder.() -> Unit): Query<T> = join(J::class.java, alias, "RIGHT") { b -> b.onClause() }
 
+        /**
+         * 设置 WHERE 条件（Java 友好的函数式接口重载）。
+         *
+         * @param clause 条件构建回调
+         * @return 当前查询构建器
+         */
         fun where(clause: ClauseConsumer): Query<T> { clause.accept(whereBuilder); return this }
+
+        /**
+         * 设置 WHERE 条件（Kotlin DSL 风格）。
+         *
+         * @param clause 条件构建 lambda
+         * @return 当前查询构建器
+         */
         fun where(clause: ConditionBuilder.() -> Unit): Query<T> = where(ClauseConsumer { b -> b.clause() })
 
+        /**
+         * 限制查询返回的最大行数。
+         *
+         * @param n 最大行数
+         * @return 当前查询构建器
+         */
         fun limit(n: Int): Query<T> {
             this.limit = n
             return this
         }
 
+        /**
+         * 分页查询，返回包含总记录数和当前页数据的 [Page] 对象。
+         *
+         * @param pageNumber 页码（从 1 开始）
+         * @param pageSize 每页记录数
+         * @param searchCount 是否查询总记录数，为 false 时总数返回 -1
+         * @return 分页结果
+         */
         fun page(pageNumber: Long, pageSize: Long, searchCount: Boolean = true): Page<T> {
             val offset = (pageNumber - 1) * pageSize
             var total: Long = 0
@@ -366,23 +441,47 @@ class ConditionBuilder(
 
         private fun buildSql(): Pair<String, List<Any?>> = buildSelectSql(true)
 
+        /**
+         * 执行查询并将结果映射为实体列表。
+         *
+         * @return 实体对象列表
+         */
         fun list(): List<T> {
             val (sql, params) = buildSql()
             return eOrm.executor.query(sql, params, clazz, eOrm.nameConverter)
         }
 
+        /**
+         * 执行查询并将结果映射为指定类型的列表。
+         *
+         * @param R 目标类型
+         * @param resultType 目标类型的 Class 对象
+         * @return 指定类型的对象列表
+         */
         fun <R> list(resultType: Class<R>): List<R> {
             val (sql, params) = buildSql()
             return eOrm.executor.query(sql, params, resultType, eOrm.nameConverter)
         }
 
+        /** 执行查询并将结果映射为指定类型的列表（reified 泛型重载）。 */
         inline fun <reified R> listAs(): List<R> = list(R::class.java)
 
+        /**
+         * 执行查询并返回第一条结果，若无结果则返回 null。
+         * 内部自动添加 LIMIT 1 优化。
+         *
+         * @return 第一条实体对象，或 null
+         */
         fun firstOrNull(): T? {
             limit(1)
             return list().firstOrNull()
         }
 
+        /**
+         * 执行查询并将结果以 Map 列表形式返回，每个 Map 的 key 为列名，value 为列值。
+         *
+         * @return Map 列表
+         */
         fun listMaps(): List<Map<String, Any?>> {
             val (sql, params) = buildSql()
             return eOrm.executor.queryMap(sql, params)
@@ -420,16 +519,19 @@ class SubQuery<T>(
         return this
     }
 
+    /** 指定子查询的列（字符串形式）。 */
     fun select(vararg cols: String): SubQuery<T> {
         cols.forEach { selections.add(StringSelection(it)) }
         return this
     }
 
+    /** 指定子查询的列（属性引用形式）。 */
     fun select(vararg props: KProperty1<*, *>): SubQuery<T> {
         props.forEach { selections.add(PropertySelection(it)) }
         return this
     }
 
+    /** 添加 JOIN 子句到子查询。 */
     fun join(target: Class<*>, alias: String, type: String = "INNER", onClause: ClauseConsumer): SubQuery<T> {
         aliasMap[target] = alias
         val meta = MetaCache.get(target, eOrm.nameConverter)
@@ -441,11 +543,19 @@ class SubQuery<T>(
         return this
     }
 
+    /** 添加 LEFT JOIN 子句到子查询。 */
     inline fun <reified J> leftJoin(alias: String, noinline onClause: ConditionBuilder.() -> Unit): SubQuery<T> = join(J::class.java, alias, "LEFT") { b -> b.onClause() }
+
+    /** 添加 INNER JOIN 子句到子查询。 */
     inline fun <reified J> innerJoin(alias: String, noinline onClause: ConditionBuilder.() -> Unit): SubQuery<T> = join(J::class.java, alias, "INNER") { b -> b.onClause() }
+
+    /** 添加 RIGHT JOIN 子句到子查询。 */
     inline fun <reified J> rightJoin(alias: String, noinline onClause: ConditionBuilder.() -> Unit): SubQuery<T> = join(J::class.java, alias, "RIGHT") { b -> b.onClause() }
 
+    /** 设置子查询的 WHERE 条件。 */
     fun where(clause: ClauseConsumer): SubQuery<T> { clause.accept(whereBuilder); return this }
+
+    /** 设置子查询的 WHERE 条件（Kotlin DSL 风格）。 */
     fun where(clause: ConditionBuilder.() -> Unit): SubQuery<T> = where(ClauseConsumer { b -> b.clause() })
 
     /**
@@ -471,6 +581,13 @@ class SubQuery<T>(
     }
 }
 
+/**
+ * DSL 更新构建器，用于构建 UPDATE 语句。
+ *
+ * 通过 [set] 设置要更新的列和值，通过 [where] 设置条件，最后调用 [exec] 执行。
+ *
+ * @param T 实体类型
+ */
 class UpdateBuilder<T>(
     private val eOrm: EOrm,
     private val clazz: Class<T>
@@ -479,6 +596,13 @@ class UpdateBuilder<T>(
     private val params = ArrayList<Any?>()
     private val whereBuilder = ConditionBuilder(eOrm.dialect, { null }, eOrm.useLiterals, eOrm.nameConverter)
 
+    /**
+     * 设置要更新的列和值（字符串列名形式）。
+     *
+     * @param column 列名
+     * @param value 新值
+     * @return 当前更新构建器
+     */
     fun set(column: String, value: Any?): UpdateBuilder<T> {
         val wrappedCol = eOrm.dialect.wrapName(column)
         if (eOrm.useLiterals) {
@@ -490,14 +614,29 @@ class UpdateBuilder<T>(
         return this
     }
 
+    /**
+     * 设置要更新的列和值（属性引用形式），自动解析列名。
+     *
+     * @param prop 实体属性引用
+     * @param value 新值
+     * @return 当前更新构建器
+     */
     fun set(prop: KProperty1<T, *>, value: Any?): UpdateBuilder<T> {
         val colName = MetaCache.resolveColumn(prop, eOrm.nameConverter)
         return set(colName, value)
     }
 
+    /** 设置 WHERE 条件（Java 友好的函数式接口重载）。 */
     fun where(clause: ClauseConsumer): UpdateBuilder<T> { clause.accept(whereBuilder); return this }
+
+    /** 设置 WHERE 条件（Kotlin DSL 风格）。 */
     fun where(clause: ConditionBuilder.() -> Unit): UpdateBuilder<T> = where(ClauseConsumer { b -> b.clause() })
 
+    /**
+     * 执行 UPDATE 语句。
+     *
+     * @return 受影响的行数，若未设置任何 SET 子句则返回 0
+     */
     fun exec(): Int {
         if (setClauses.isEmpty()) return 0
         val meta = MetaCache.get(clazz, eOrm.nameConverter)
@@ -515,15 +654,30 @@ class UpdateBuilder<T>(
     }
 }
 
+/**
+ * DSL 删除构建器，用于构建 DELETE 语句。
+ *
+ * 通过 [where] 设置条件，调用 [exec] 执行删除。
+ *
+ * @param T 实体类型
+ */
 class DeleteBuilder<T>(
     private val eOrm: EOrm,
     private val clazz: Class<T>
 ) {
     private val whereBuilder = ConditionBuilder(eOrm.dialect, { null }, eOrm.useLiterals, eOrm.nameConverter)
 
+    /** 设置 WHERE 条件（Java 友好的函数式接口重载）。 */
     fun where(clause: ClauseConsumer): DeleteBuilder<T> { clause.accept(whereBuilder); return this }
+
+    /** 设置 WHERE 条件（Kotlin DSL 风格）。 */
     fun where(clause: ConditionBuilder.() -> Unit): DeleteBuilder<T> = where(ClauseConsumer { b -> b.clause() })
 
+    /**
+     * 执行 DELETE 语句。
+     *
+     * @return 受影响的行数
+     */
     fun exec(): Int {
         val meta = MetaCache.get(clazz, eOrm.nameConverter)
         val tableName = eOrm.dialect.wrapName(meta.tableName)

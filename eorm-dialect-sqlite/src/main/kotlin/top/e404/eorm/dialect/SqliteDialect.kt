@@ -25,4 +25,8 @@ class SqliteDialect : BaseDialect() {
 
     override fun getPrimaryKeyDefinition(strategy: IdStrategy): String =
         if (strategy == IdStrategy.AUTO) "PRIMARY KEY AUTOINCREMENT" else "PRIMARY KEY"
+
+    override fun buildPaginationSql(sql: String, offset: Long, limit: Long): String {
+        return "$sql LIMIT $limit OFFSET $offset"
+    }
 }

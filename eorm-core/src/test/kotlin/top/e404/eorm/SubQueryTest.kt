@@ -193,4 +193,78 @@ class SubQueryTest : BaseTest() {
         assertTrue(admins.any { it.name == "Alice" })
         assertTrue(admins.any { it.name == "Charlie" })
     }
+
+    @Test
+    fun `eqSub - find user with max age`() {
+        // SELECT * FROM sys_user u WHERE u.age = (SELECT MAX(u2.age) FROM sys_user u2)
+        val maxAge = db.subQuery<TestUser>("u2")
+            .select("MAX(u2.`age`)")
+
+        val oldest = db.from<TestUser>("u")
+            .where { eqSub(TestUser::age, maxAge) }
+            .list()
+
+        assertEquals(1, oldest.size)
+        assertEquals("Dave", oldest[0].name)
+        assertEquals(35, oldest[0].age)
+    }
+
+    @Test
+    fun `geSub - find users with age greater than or equal to avg`() {
+        // AVG(20, 25, 30, 35) = 27.5
+        val avgAge = db.subQuery<TestUser>("u2")
+            .select("AVG(u2.`age`)")
+
+        val result = db.from<TestUser>("u")
+            .where { geSub(TestUser::age, avgAge) }
+            .list()
+
+        // 30 >= 27.5 and 35 >= 27.5
+        assertEquals(2, result.size)
+        assertTrue(result.any { it.name == "Charlie" })
+        assertTrue(result.any { it.name == "Dave" })
+    }
+
+    @Test
+    fun `leSub - find users with age less than or equal to avg`() {
+        val avgAge = db.subQuery<TestUser>("u2")
+            .select("AVG(u2.`age`)")
+
+        val result = db.from<TestUser>("u")
+            .where { leSub(TestUser::age, avgAge) }
+            .list()
+
+        // 20 <= 27.5 and 25 <= 27.5
+        assertEquals(2, result.size)
+        assertTrue(result.any { it.name == "Alice" })
+        assertTrue(result.any { it.name == "Bob" })
+    }
+
+    @Test
+    fun `exists non-lambda overload with pre-built subquery`() {
+        // 非 lambda 版本：子查询在 exists 调用前已构建完毕
+        val sub = db.subQuery<SubTestUserRole>("ur")
+            .select("1")
+            .where { gt(SubTestUserRole::userId, 0) }
+
+        val result = db.from<TestUser>("u")
+            .where { exists(sub) }
+            .list()
+
+        // user_role 表有数据，EXISTS 为 true，返回所有用户
+        assertEquals(4, result.size)
+    }
+
+    @Test
+    fun `notExists non-lambda overload`() {
+        val sub = db.subQuery<SubTestUserRole>("ur")
+            .select("1")
+            .where { lt(SubTestUserRole::userId, 0) } // 不可能匹配
+
+        val result = db.from<TestUser>("u")
+            .where { notExists(sub) }
+            .list()
+
+        assertEquals(4, result.size)
+    }
 }

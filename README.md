@@ -7,7 +7,7 @@
 - 使用HikariCP进行数据库连接池管理，确保高效的连接复用和性能优化。
 - 支持多种数据库类型，包括MySQL、PostgreSQL、SQLite等，方便开发者根据需求选择合适的数据库。
 - 提供MybatisPlus风格的dsl查询构建器，简化复杂查询的编写。
-- 不使用sql template占位符，直接构建查询语句，对打印sql语句提供原生支持，方便调试和日志记录。
+- 支持 `useLiterals` 模式，直接将参数值拼入 SQL 语句，方便调试和日志记录。
 - 内置 Snowflake / UUID / 自增 / 手动赋值等多种主键策略。
 - 插入前自动校验非空约束和字符串长度限制。
 - 支持自动填充字段（如创建时间）。
@@ -70,7 +70,7 @@ val dataSource: DataSource = ... // HikariCP 或其他数据源
 
 val db = EOrm(
     dataSource = dataSource,
-    dialect = MysqlDialect(),                    // 方言 (MySQL, Postgres, SQLite, H2)
+    dialect = MySqlDialect(),                    // 方言 (MySQL, Postgres, SQLite, H2)
     nameConverter = CamelToSnakeConverter,        // 命名转换策略（默认驼峰转下划线）
     logger = ConsoleLogger,                      // 日志实现（默认控制台输出）
     useLiterals = false,                         // true 时直接拼接参数值到 SQL，方便调试
@@ -89,7 +89,7 @@ val ddl = db.generateDdl(User::class.java)
 开启后，SQL 中的 `?` 占位符会被替换为实际参数值，生成的 SQL 可直接复制到数据库客户端执行，方便调试：
 
 ```kotlin
-val db = EOrm(dataSource, MysqlDialect(), useLiterals = true)
+val db = EOrm(dataSource, MySqlDialect(), useLiterals = true)
 // 日志输出: SELECT * FROM `sys_user` u WHERE u.`age` = 18
 // 而非:     SELECT * FROM `sys_user` u WHERE u.`age` = ?
 ```
@@ -106,7 +106,7 @@ class MyDataFiller : DataFiller {
     }
 }
 
-val db = EOrm(dataSource, MysqlDialect(), dataFiller = MyDataFiller())
+val db = EOrm(dataSource, MySqlDialect(), dataFiller = MyDataFiller())
 ```
 
 ### 3. 基础 CRUD
@@ -145,6 +145,8 @@ db.delete<User>()
 
 支持类似 MyBatis-Plus 的流畅查询，但更加符合 Kotlin 语法习惯。
 
+`from<T>(alias)` 中的 `alias` 是表别名，用于多表查询时区分列来源。
+
 #### 基础查询
 
 ```kotlin
@@ -158,15 +160,32 @@ val list = db.from<User>("u")
     }
     .list()
 
-// 获取单条记录
+// 获取单条记录（内部自动 limit(1)）
 val user = db.from<User>("u")
     .where { eq(User::id, 1) }
     .firstOrNull()
+
+// nest 嵌套：生成 AND (...)
+val list2 = db.from<User>("u")
+    .where {
+        nest {
+            lt(User::age, 15)
+            or()
+            gt(User::age, 50)
+        }
+    }
+    .list()
+
+// select 支持字符串和属性引用两种方式
+val list3 = db.from<User>("u")
+    .select(User::name, User::age)       // 属性引用（推荐）
+    .select("COUNT(*) AS cnt")           // 字符串（用于聚合等场景）
+    .listMaps()
 ```
 
 #### 联表查询 (Joins)
 
-类型安全的 Join 操作，支持多种 Join 类型。
+类型安全的 Join 操作，支持 `innerJoin`、`leftJoin`、`rightJoin`。
 
 ```kotlin
 val result = db.from<User>("u")
@@ -287,7 +306,7 @@ object MyConverter : NameConverter {
     override fun convert(name: String): String = name.lowercase()
 }
 
-val db = EOrm(dataSource, MysqlDialect(), nameConverter = MyConverter)
+val db = EOrm(dataSource, MySqlDialect(), nameConverter = MyConverter)
 ```
 
 ### 7. 事务支持

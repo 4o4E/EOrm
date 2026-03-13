@@ -2,8 +2,18 @@ package top.e404.eorm.generator
 
 import java.util.UUID
 
+/**
+ * 主键生成策略枚举。
+ * - [AUTO] 数据库自增
+ * - [SNOWFLAKE] 雪花算法生成分布式唯一 ID
+ * - [UUID] 生成 UUID 字符串
+ * - [MANUAL] 手动指定
+ */
 enum class IdStrategy { AUTO, SNOWFLAKE, UUID, MANUAL }
 
+/**
+ * 主键生成器，提供雪花算法和 UUID 两种 ID 生成方式。
+ */
 object IdGenerator {
     private const val WORKER_ID_BITS = 5L
     private const val DATACENTER_ID_BITS = 5L
@@ -18,6 +28,11 @@ object IdGenerator {
     private var sequence: Long = 0L
     private var lastTimestamp: Long = -1L
 
+    /**
+     * 使用雪花算法生成下一个唯一 ID。
+     * @return 64 位长整型唯一 ID
+     * @throws RuntimeException 当检测到时钟回拨时抛出
+     */
     @Synchronized
     fun nextSnowflakeId(): Long {
         var timestamp = System.currentTimeMillis()
@@ -31,10 +46,17 @@ object IdGenerator {
                 (datacenterId shl DATACENTER_ID_SHIFT.toInt()) or
                 (workerId shl WORKER_ID_SHIFT.toInt()) or sequence
     }
+
+    /** 自旋等待直到下一毫秒。 */
     private fun tilNextMillis(lastTimestamp: Long): Long {
         var timestamp = System.currentTimeMillis()
         while (timestamp <= lastTimestamp) timestamp = System.currentTimeMillis()
         return timestamp
     }
+
+    /**
+     * 生成去除连字符的 UUID 字符串。
+     * @return 32 位 UUID 字符串
+     */
     fun nextUuid(): String = UUID.randomUUID().toString().replace("-", "")
 }
