@@ -359,3 +359,5 @@ try {
 - PostgreSQL
 - SQLite
 - H2
+
+需要添加其他数据库支持？参考 [添加数据库方言集成指南](DIALECT_GUIDE.md)。
