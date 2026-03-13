@@ -1,6 +1,10 @@
 package top.e404.eorm.dialect
 
 import top.e404.eorm.generator.IdStrategy
+import java.lang.reflect.Field
+import java.sql.Connection
+import java.sql.PreparedStatement
+import java.sql.Statement
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.time.LocalDateTime
@@ -63,6 +67,53 @@ interface SqlDialect {
      * @return 支持返回 true，不支持返回 false
      */
     fun supportsIfNotExists(): Boolean
+
+    /**
+     * 构建 INSERT SQL 语句。
+     * 默认生成标准 `INSERT INTO table (cols) VALUES (?)` 语法。
+     * 方言可覆写以追加 `RETURNING id` 等子句。
+     *
+     * @param tableName 已包装的表名
+     * @param columnNames 已包装的列名列表
+     * @return INSERT SQL 模板（使用 `?` 占位符）
+     */
+    fun buildInsertSql(tableName: String, columnNames: List<String>): String
+
+    /**
+     * 为批量插入创建 PreparedStatement。
+     * 默认使用 [Statement.RETURN_GENERATED_KEYS]。
+     * 方言可覆写以使用特定的 generated keys 获取方式（如 Oracle 需指定列名数组）。
+     *
+     * @param conn 数据库连接
+     * @param sql INSERT SQL 模板
+     * @param idColumnName 主键列名（已包装），无自增主键时为 null
+     * @return PreparedStatement
+     */
+    fun prepareInsertStatement(conn: Connection, sql: String, idColumnName: String?): PreparedStatement
+
+    /**
+     * 从已执行的 PreparedStatement 中提取自增生成的主键值，回填到实体对象。
+     * 默认通过 [Statement.getGeneratedKeys] 获取。
+     * 方言可覆写以处理特定数据库的差异（如 PostgreSQL 的 RETURNING 结果集）。
+     *
+     * @param stmt 已执行的 PreparedStatement
+     * @param entities 实体列表
+     * @param idField 主键字段
+     * @param convertType 类型转换函数
+     */
+    fun <T> extractGeneratedKeys(
+        stmt: PreparedStatement,
+        entities: List<T>,
+        idField: Field,
+        convertType: (Any, Class<*>) -> Any
+    )
+
+    /**
+     * 获取批量插入时每批次刷新的行数。
+     * 不同数据库和驱动的最优批量大小不同。
+     * @return 批次大小
+     */
+    fun getInsertBatchSize(): Int
 }
 
 /**
@@ -92,4 +143,35 @@ abstract class BaseDialect : SqlDialect {
     }
 
     override fun supportsIfNotExists(): Boolean = true
+
+    override fun buildInsertSql(tableName: String, columnNames: List<String>): String {
+        val cols = columnNames.joinToString(", ")
+        val placeholders = columnNames.joinToString(", ") { "?" }
+        return "INSERT INTO $tableName ($cols) VALUES ($placeholders)"
+    }
+
+    override fun prepareInsertStatement(conn: Connection, sql: String, idColumnName: String?): PreparedStatement {
+        return conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)
+    }
+
+    override fun <T> extractGeneratedKeys(
+        stmt: PreparedStatement,
+        entities: List<T>,
+        idField: Field,
+        convertType: (Any, Class<*>) -> Any
+    ) {
+        val rs = stmt.generatedKeys
+        var index = 0
+        while (rs.next() && index < entities.size) {
+            val generatedKey = rs.getObject(1)
+            val entity = entities[index]
+            val currentVal = idField.get(entity)
+            if (currentVal == null || (currentVal is Number && currentVal.toLong() == 0L)) {
+                idField.set(entity, convertType(generatedKey, idField.type))
+            }
+            index++
+        }
+    }
+
+    override fun getInsertBatchSize(): Int = 100
 }

@@ -33,7 +33,7 @@ object ConsoleLogger : EOrmLogger {
         if (args.isEmpty()) {
             println("[EOrm] SQL: $sql")
         } else {
-            println("[EOrm] SQL: ${DefaultSqlFormatter.format(sql, args)}")
+            println("[EOrm] SQL: $sql | args: $args")
         }
     }
     override fun info(message: String) = println("[EOrm] INFO: $message")

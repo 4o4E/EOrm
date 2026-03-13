@@ -41,7 +41,7 @@ class EOrm(
     val dataFiller: DataFiller = NoOpDataFiller()
 ) {
     val transactionManager = TransactionManager(dataSource)
-    val executor = SqlExecutor(dataSource, logger, useLiterals, transactionManager)
+    val executor = SqlExecutor(dataSource, logger, useLiterals, transactionManager, dialect)
 
     // ==================== 事务 API ====================
 
@@ -162,14 +162,17 @@ class EOrm(
         }
 
         val tableName = dialect.wrapName(meta.tableName)
-        val colNames = insertCols.joinToString(", ") { dialect.wrapName(it.columnName) }
-        val placeholders = insertCols.joinToString(", ") { "?" }
-        val sql = "INSERT INTO $tableName ($colNames) VALUES ($placeholders)"
+        val columnNames = insertCols.map { dialect.wrapName(it.columnName) }
+        val sql = dialect.buildInsertSql(tableName, columnNames)
+
+        val idColumnName = if (idStrategy == IdStrategy.AUTO && meta.idColumn != null) {
+            dialect.wrapName(meta.idColumn)
+        } else null
 
         for (batch in entities.chunked(batchSize)) {
             val paramsList = batch.map { entity -> insertCols.map { it.field.get(entity) } }
             val fieldToFill = if (idStrategy == IdStrategy.AUTO) idField else null
-            executor.executeBatchInsert(sql, paramsList, batch, fieldToFill)
+            executor.executeBatchInsert(sql, paramsList, batch, fieldToFill, idColumnName)
         }
     }
 
