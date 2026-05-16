@@ -20,6 +20,7 @@ import top.e404.eorm.mapping.CamelToSnakeConverter
 import top.e404.eorm.mapping.NameConverter
 import top.e404.eorm.meta.ColumnMeta
 import top.e404.eorm.meta.MetaCache
+import top.e404.eorm.migration.SqlMigrator
 import top.e404.eorm.transaction.CoroutineTransaction
 import top.e404.eorm.transaction.TransactionManager
 import top.e404.eorm.transaction.TransactionPropagation
@@ -412,4 +413,9 @@ class EOrm(
 
     /** 创建子查询构建器（reified 泛型重载）。 */
     inline fun <reified T> subQuery(alias: String): SubQuery<T> = SubQuery(this, T::class.java, alias)
+
+    /**
+     * 创建 SQL migration runner。
+     */
+    fun migrator(): SqlMigrator = SqlMigrator(this)
 }

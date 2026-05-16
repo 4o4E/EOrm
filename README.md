@@ -433,3 +433,30 @@ try {
 ## 文档
 
 - [DI 与大型项目改造计划](docs/DI_REFACTOR_PLAN.md)
+
+## SQL Migration
+
+EOrm 支持轻量级版本化 SQL migration。脚本文件名格式：
+
+```text
+V1__create_user.sql
+V2__add_user_email.sql
+```
+
+执行：
+
+```kotlin
+db.migrator()
+    .locations("db/migration")
+    .migrate()
+```
+
+也可以使用 classpath 目录：
+
+```kotlin
+db.migrator()
+    .locations("classpath:db/migration")
+    .migrate()
+```
+
+迁移会自动创建 `eorm_schema_history` 历史表，按版本顺序执行脚本，并用 SHA-256 checksum 防止已执行脚本被修改。单个脚本可以包含多条 SQL，执行器会按分号拆分，同时避开字符串和注释里的分号。
