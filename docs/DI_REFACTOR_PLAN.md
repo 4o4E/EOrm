@@ -296,7 +296,7 @@ fun create(user: User) {
 
 当前会出现嵌套事务异常。
 
-改造后示意：
+改造后：
 
 ```kotlin
 fun <T> transaction(
@@ -307,8 +307,8 @@ fun <T> transaction(
         return when (propagation) {
             TransactionPropagation.REQUIRED -> this.block()
             TransactionPropagation.NEVER -> error("Transaction already active")
-            // suspendAndRunNew 表示先挂起当前连接，再用新连接执行内层事务。
-            TransactionPropagation.REQUIRES_NEW -> transactionManager.suspendAndRunNew { this.block() }
+            // runInNewTransaction 会先挂起当前连接，再用新连接执行内层事务。
+            TransactionPropagation.REQUIRES_NEW -> transactionManager.runInNewTransaction { this.block() }
         }
     }
 

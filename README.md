@@ -324,6 +324,18 @@ db.transaction {
 }
 ```
 
+同步事务支持传播策略，默认 `REQUIRED` 会在嵌套调用时复用当前事务：
+
+```kotlin
+db.transaction {
+    userRepository.create(user) // 内部再次调用 transaction { ... } 时复用外层事务
+}
+
+db.transaction(TransactionPropagation.REQUIRES_NEW) {
+    auditRepository.save(record) // 使用独立事务
+}
+```
+
 #### 协程事务
 
 协程切换线程时事务连接会自动跟随，通过 `CoroutineContext` 维护。

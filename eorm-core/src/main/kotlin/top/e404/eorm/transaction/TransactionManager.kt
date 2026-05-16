@@ -55,6 +55,31 @@ class TransactionManager(private val dataSource: DataSource) {
         }
     }
 
+    /**
+     * 挂起当前线程事务连接，使用新连接执行独立事务，结束后恢复原连接。
+     */
+    internal fun <T> runInNewTransaction(block: () -> T): T {
+        val suspended = threadLocalConnection.get()
+        threadLocalConnection.remove()
+        return try {
+            begin()
+            try {
+                val result = block()
+                commit()
+                result
+            } catch (e: Exception) {
+                rollback()
+                throw e
+            }
+        } finally {
+            if (suspended != null) {
+                threadLocalConnection.set(suspended)
+            } else {
+                threadLocalConnection.remove()
+            }
+        }
+    }
+
     private fun cleanup(conn: Connection) {
         try {
             conn.autoCommit = true

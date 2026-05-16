@@ -19,6 +19,7 @@ import top.e404.eorm.mapping.NameConverter
 import top.e404.eorm.meta.MetaCache
 import top.e404.eorm.transaction.CoroutineTransaction
 import top.e404.eorm.transaction.TransactionManager
+import top.e404.eorm.transaction.TransactionPropagation
 import top.e404.eorm.validation.EntityValidator
 import java.lang.reflect.Field
 import javax.sql.DataSource
@@ -60,7 +61,22 @@ class EOrm(
      * }
      * ```
      */
-    fun <T> transaction(block: EOrm.() -> T): T {
+    fun <T> transaction(
+        propagation: TransactionPropagation = TransactionPropagation.REQUIRED,
+        block: EOrm.() -> T
+    ): T {
+        if (transactionManager.isInTransaction()) {
+            return when (propagation) {
+                TransactionPropagation.REQUIRED -> this.block()
+                TransactionPropagation.REQUIRES_NEW -> transactionManager.runInNewTransaction { this.block() }
+                TransactionPropagation.NEVER -> throw IllegalStateException("Transaction already active on current thread")
+            }
+        }
+
+        if (propagation == TransactionPropagation.NEVER) {
+            return this.block()
+        }
+
         transactionManager.begin()
         return try {
             val result = this.block()

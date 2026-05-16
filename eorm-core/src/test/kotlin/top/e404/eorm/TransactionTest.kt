@@ -5,6 +5,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import top.e404.eorm.transaction.TransactionPropagation
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -75,16 +76,46 @@ class TransactionTest : BaseTest() {
     }
 
     @Test
-    fun `nested transaction throws exception`() {
+    fun `nested transaction with required joins existing transaction`() {
+        db.transaction {
+            insert(TestUser(name = "Alice", age = 20))
+            transaction {
+                insert(TestUser(name = "Bob", age = 25))
+            }
+        }
+
+        val users = db.from<TestUser>("u").list()
+        assertEquals(2, users.size)
+        assertTrue(users.any { it.name == "Alice" })
+        assertTrue(users.any { it.name == "Bob" })
+    }
+
+    @Test
+    fun `nested transaction with never throws exception`() {
         assertThrows<IllegalStateException> {
             db.transaction {
-                insert(TestUser(name = "Alice", age = 20))
-                // 嵌套事务应抛异常
-                transaction {
-                    insert(TestUser(name = "Bob", age = 25))
+                transaction(TransactionPropagation.NEVER) {
+                    insert(TestUser(name = "Never", age = 20))
                 }
             }
         }
+    }
+
+    @Test
+    fun `requires new transaction commits independently`() {
+        assertThrows<RuntimeException> {
+            db.transaction {
+                insert(TestUser(name = "Outer", age = 20))
+                transaction(TransactionPropagation.REQUIRES_NEW) {
+                    insert(TestUser(name = "Inner", age = 25))
+                }
+                throw RuntimeException("Rollback outer")
+            }
+        }
+
+        val users = db.from<TestUser>("u").list()
+        assertEquals(1, users.size)
+        assertEquals("Inner", users[0].name)
     }
 
     @Test
