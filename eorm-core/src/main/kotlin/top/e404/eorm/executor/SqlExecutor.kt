@@ -61,8 +61,9 @@ class SqlExecutor(
         idColumnName: String?
     ) {
         try {
+            logger.info("Batch insert size: ${paramsList.size}")
             if (useLiterals) {
-                logger.info("Batch Insert (Literal Mode) Size: ${paramsList.size}")
+                var affected = 0
                 withConnection { conn ->
                     conn.createStatement().use { stmt ->
                         paramsList.forEach { params ->
@@ -70,30 +71,33 @@ class SqlExecutor(
                             logger.logSql(finalSql)
                             stmt.addBatch(finalSql)
                         }
-                        stmt.executeBatch()
+                        affected += countAffected(stmt.executeBatch())
                     }
                 }
+                logger.info("Batch insert affected rows: $affected, batch size: ${paramsList.size}")
             } else {
                 if (paramsList.isNotEmpty()) logger.logSql(sqlTemplate, paramsList[0])
+                var affected = 0
                 withConnection { conn ->
                     dialect.prepareInsertStatement(conn, sqlTemplate, idColumnName).use { stmt ->
                         val batchSize = dialect.getInsertBatchSize()
                         for ((i, params) in paramsList.withIndex()) {
                             params.forEachIndexed { idx, value -> setParam(stmt, idx + 1, value) }
                             stmt.addBatch()
-                            if ((i + 1) % batchSize == 0) stmt.executeBatch()
+                            if ((i + 1) % batchSize == 0) affected += countAffected(stmt.executeBatch())
                         }
                         if (paramsList.size % batchSize != 0) {
-                            stmt.executeBatch()
+                            affected += countAffected(stmt.executeBatch())
                         }
                         if (idField != null) {
                             dialect.extractGeneratedKeys(stmt, entities, idField, ::convertType)
                         }
                     }
                 }
+                logger.info("Batch insert affected rows: $affected, batch size: ${paramsList.size}")
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            logger.error("Failed to execute batch insert", e)
             throw e
         }
     }
@@ -160,9 +164,18 @@ class SqlExecutor(
                 stmt.executeBatch().forEach { count ->
                     if (count > 0) affected += count
                 }
+                logger.info("Batch update affected rows: $affected, batch size: ${paramsList.size}")
                 affected
             }
         }
+    }
+
+    private fun countAffected(results: IntArray): Int {
+        var affected = 0
+        for (count in results) {
+            if (count > 0) affected += count
+        }
+        return affected
     }
 
     private fun <T> mapResult(rs: java.sql.ResultSet, clazz: Class<T>, list: ArrayList<T>, converter: NameConverter) {

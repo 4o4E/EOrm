@@ -25,7 +25,7 @@ interface DataFiller {
         val meta = MetaCache.get(entity.javaClass, converter)
         val field = meta.propMap[fieldName]
         if (field != null) {
-            try { field.set(entity, value) } catch (e: Exception) { e.printStackTrace() }
+            field.set(entity, value)
         }
     }
 }

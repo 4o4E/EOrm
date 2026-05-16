@@ -81,7 +81,12 @@ class UpsertBuilder<T : Any>(
         val paramsList = entities.map { entity ->
             insertCols.map { col: ColumnMeta -> eOrm.getColumnValue(entity, col) }
         }
-        return eOrm.executor.executeBatchUpdate(sql, paramsList)
+        eOrm.logger.info(
+            "Upsert execute batch size: ${paramsList.size}, conflict columns: ${resolvedConflictColumns.joinToString(",")}, update columns: ${resolvedUpdateColumns.joinToString(",")}"
+        )
+        val affected = eOrm.executor.executeBatchUpdate(sql, paramsList)
+        eOrm.logger.info("Upsert affected rows: $affected, batch size: ${paramsList.size}")
+        return affected
     }
 
     private fun resolveColumns(columns: List<String>, propToColumn: Map<String, String>): List<String> {

@@ -48,24 +48,34 @@ class SqlMigrator(
     fun migrate(): MigrationResult {
         ensureHistoryTable()
         val allScripts = (scripts + loadScripts()).sortedWith(compareBy<MigrationScript> { VersionKey(it.version) }.thenBy { it.name })
+        eOrm.logger.info("Migration start scripts=${allScripts.size}")
         val applied = ArrayList<MigrationScript>()
         val skipped = ArrayList<MigrationScript>()
 
         for (script in allScripts) {
-            val checksum = checksum(script.sql)
-            val existing = findApplied(script.version)
-            if (existing != null) {
-                if (existing != checksum) {
-                    throw IllegalStateException("Migration ${script.version} checksum mismatch")
+            try {
+                val checksum = checksum(script.sql)
+                val existing = findApplied(script.version)
+                if (existing != null) {
+                    if (existing != checksum) {
+                        val exception = IllegalStateException("Migration ${script.version} checksum mismatch")
+                        eOrm.logger.error("Migration checksum mismatch version=${script.version} script=${script.name}", exception)
+                        throw exception
+                    }
+                    eOrm.logger.info("Migration skip version=${script.version} script=${script.name}")
+                    skipped.add(script)
+                    continue
                 }
-                skipped.add(script)
-                continue
-            }
 
-            apply(script, checksum)
-            applied.add(script)
+                apply(script, checksum)
+                applied.add(script)
+            } catch (e: Exception) {
+                eOrm.logger.error("Migration failed version=${script.version} script=${script.name}", e)
+                throw e
+            }
         }
 
+        eOrm.logger.info("Migration complete applied=${applied.size}, skipped=${skipped.size}")
         return MigrationResult(applied, skipped)
     }
 
@@ -95,6 +105,7 @@ class SqlMigrator(
 
     private fun apply(script: MigrationScript, checksum: String) {
         val started = System.currentTimeMillis()
+        eOrm.logger.info("Migration apply version=${script.version} script=${script.name}")
         eOrm.transaction {
             for (statement in SqlScriptParser.splitStatements(script.sql)) {
                 executor.execute(statement)
@@ -105,6 +116,7 @@ class SqlMigrator(
                 listOf(script.version, script.description, script.name, checksum, LocalDateTime.now(), executionMs, true)
             )
         }
+        eOrm.logger.info("Migration applied version=${script.version} script=${script.name} executionMs=${System.currentTimeMillis() - started}")
     }
 
     private fun loadScripts(): List<MigrationScript> {
