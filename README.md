@@ -361,3 +361,7 @@ try {
 - H2
 
 需要添加其他数据库支持？参考 [添加数据库方言集成指南](DIALECT_GUIDE.md)。
+
+## 文档
+
+- [DI 与大型项目改造计划](docs/DI_REFACTOR_PLAN.md)
