@@ -6,13 +6,17 @@ import top.e404.eorm.annotations.Column
 import top.e404.eorm.annotations.Id
 import top.e404.eorm.annotations.Table
 import top.e404.eorm.exception.ValidationException
+import top.e404.eorm.executor.SqlExecutor
 import top.e404.eorm.filler.DataFiller
+import top.e404.eorm.generator.EOrmIdGenerator
 import top.e404.eorm.generator.IdStrategy
 import top.e404.eorm.mapping.NameConverter
+import top.e404.eorm.transaction.TransactionManager
 import java.time.LocalDateTime
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -130,6 +134,38 @@ class SupplementaryTest : BaseTest() {
             .firstOrNull()
         assertNotNull(fetched)
         assertEquals("Manual", fetched.name)
+    }
+
+    @Test
+    fun `custom id generator is used on insert`() {
+        db.executor.execute("DROP TABLE IF EXISTS snowflake_entity")
+        db.createTable<SnowflakeEntity>()
+
+        val generator = object : EOrmIdGenerator {
+            override fun nextSnowflakeId(): Long = 123456L
+            override fun nextUuid(): String = "fixeduuid"
+        }
+        val dbWithGenerator = EOrm(dataSource, db.dialect, idGenerator = generator)
+
+        val entity = SnowflakeEntity(name = "Custom")
+        dbWithGenerator.insert(entity)
+
+        assertEquals(123456L, entity.id)
+    }
+
+    @Test
+    fun `custom transaction manager and executor can be injected`() {
+        val transactionManager = TransactionManager(dataSource)
+        val executor = SqlExecutor(dataSource, db.logger, db.useLiterals, transactionManager, db.dialect)
+        val injectedDb = EOrm(
+            dataSource = dataSource,
+            dialect = db.dialect,
+            transactionManager = transactionManager,
+            executor = executor
+        )
+
+        assertSame(transactionManager, injectedDb.transactionManager)
+        assertSame(executor, injectedDb.executor)
     }
 
     // ==================== DataFiller ====================

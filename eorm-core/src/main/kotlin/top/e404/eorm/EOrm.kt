@@ -9,6 +9,7 @@ import top.e404.eorm.dsl.UpdateBuilder
 import top.e404.eorm.executor.SqlExecutor
 import top.e404.eorm.filler.DataFiller
 import top.e404.eorm.filler.NoOpDataFiller
+import top.e404.eorm.generator.EOrmIdGenerator
 import top.e404.eorm.generator.IdGenerator
 import top.e404.eorm.generator.IdStrategy
 import top.e404.eorm.log.ConsoleLogger
@@ -31,6 +32,9 @@ import javax.sql.DataSource
  * @param logger 日志记录器
  * @param useLiterals 是否将参数直接拼接到 SQL 中（调试用，生产环境慎用）
  * @param dataFiller 数据自动填充器，用于插入时自动填充字段
+ * @param idGenerator 主键生成器，用于 SNOWFLAKE / UUID 策略
+ * @param transactionManager 事务管理器，可由 DI 容器注入以便替换或包装
+ * @param executor SQL 执行器，可由 DI 容器注入以便监控、测试或扩展
  */
 class EOrm(
     val dataSource: DataSource,
@@ -38,10 +42,11 @@ class EOrm(
     val nameConverter: NameConverter = CamelToSnakeConverter,
     val logger: EOrmLogger = ConsoleLogger,
     val useLiterals: Boolean = false,
-    val dataFiller: DataFiller = NoOpDataFiller()
+    val dataFiller: DataFiller = NoOpDataFiller(),
+    val idGenerator: EOrmIdGenerator = IdGenerator,
+    val transactionManager: TransactionManager = TransactionManager(dataSource),
+    val executor: SqlExecutor = SqlExecutor(dataSource, logger, useLiterals, transactionManager, dialect)
 ) {
-    val transactionManager = TransactionManager(dataSource)
-    val executor = SqlExecutor(dataSource, logger, useLiterals, transactionManager, dialect)
 
     // ==================== 事务 API ====================
 
@@ -146,8 +151,8 @@ class EOrm(
                 val currentId = idField.get(entity)
                 if (isIdEmpty(currentId)) {
                     when (idStrategy) {
-                        IdStrategy.SNOWFLAKE -> idField.set(entity, IdGenerator.nextSnowflakeId())
-                        IdStrategy.UUID -> idField.set(entity, IdGenerator.nextUuid())
+                        IdStrategy.SNOWFLAKE -> idField.set(entity, idGenerator.nextSnowflakeId())
+                        IdStrategy.UUID -> idField.set(entity, idGenerator.nextUuid())
                         else -> {}
                     }
                 }

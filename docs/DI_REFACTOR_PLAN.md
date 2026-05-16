@@ -375,9 +375,11 @@ class DefaultIdGenerator(
 ```kotlin
 class EOrm(
     // existing params
-    val idGenerator: EOrmIdGenerator = DefaultIdGenerator()
+    val idGenerator: EOrmIdGenerator = IdGenerator
 )
 ```
+
+默认继续使用全局 `IdGenerator` 以保持既有行为和单 JVM 内的序列连续性；需要按节点配置时，再通过 DI 注入 `DefaultIdGenerator(workerId, datacenterId)` 或自定义实现。
 
 插入逻辑改造前：
 

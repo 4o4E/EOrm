@@ -14,27 +14,44 @@ enum class IdStrategy { AUTO, SNOWFLAKE, UUID, MANUAL }
 /**
  * 主键生成器，提供雪花算法和 UUID 两种 ID 生成方式。
  */
-object IdGenerator {
-    private const val WORKER_ID_BITS = 5L
-    private const val DATACENTER_ID_BITS = 5L
-    private const val SEQUENCE_BITS = 12L
-    private const val SEQUENCE_MASK = -1L xor (-1L shl SEQUENCE_BITS.toInt())
-    private const val WORKER_ID_SHIFT = SEQUENCE_BITS
-    private const val DATACENTER_ID_SHIFT = SEQUENCE_BITS + WORKER_ID_BITS
-    private const val TIMESTAMP_LEFT_SHIFT = SEQUENCE_BITS + WORKER_ID_BITS + DATACENTER_ID_BITS
-    private const val TWEPOCH = 1288834974657L
-    private var workerId: Long = 1
-    private var datacenterId: Long = 1
-    private var sequence: Long = 0L
-    private var lastTimestamp: Long = -1L
-
+interface EOrmIdGenerator {
     /**
      * 使用雪花算法生成下一个唯一 ID。
      * @return 64 位长整型唯一 ID
      * @throws RuntimeException 当检测到时钟回拨时抛出
      */
+    fun nextSnowflakeId(): Long
+
+    /**
+     * 生成去除连字符的 UUID 字符串。
+     * @return 32 位 UUID 字符串
+     */
+    fun nextUuid(): String
+}
+
+/**
+ * 默认主键生成器实现，提供可配置 workerId/datacenterId 的雪花算法和 UUID。
+ */
+class DefaultIdGenerator(
+    private val workerId: Long = 1,
+    private val datacenterId: Long = 1
+) : EOrmIdGenerator {
+    private companion object {
+        private const val WORKER_ID_BITS = 5L
+        private const val DATACENTER_ID_BITS = 5L
+        private const val SEQUENCE_BITS = 12L
+        private const val SEQUENCE_MASK = -1L xor (-1L shl SEQUENCE_BITS.toInt())
+        private const val WORKER_ID_SHIFT = SEQUENCE_BITS
+        private const val DATACENTER_ID_SHIFT = SEQUENCE_BITS + WORKER_ID_BITS
+        private const val TIMESTAMP_LEFT_SHIFT = SEQUENCE_BITS + WORKER_ID_BITS + DATACENTER_ID_BITS
+        private const val TWEPOCH = 1288834974657L
+    }
+
+    private var sequence: Long = 0L
+    private var lastTimestamp: Long = -1L
+
     @Synchronized
-    fun nextSnowflakeId(): Long {
+    override fun nextSnowflakeId(): Long {
         var timestamp = System.currentTimeMillis()
         if (timestamp < lastTimestamp) throw RuntimeException("Clock moved backwards")
         if (lastTimestamp == timestamp) {
@@ -54,9 +71,10 @@ object IdGenerator {
         return timestamp
     }
 
-    /**
-     * 生成去除连字符的 UUID 字符串。
-     * @return 32 位 UUID 字符串
-     */
-    fun nextUuid(): String = UUID.randomUUID().toString().replace("-", "")
+    override fun nextUuid(): String = UUID.randomUUID().toString().replace("-", "")
 }
+
+/**
+ * 全局默认主键生成器。保留该入口以兼容既有代码。
+ */
+object IdGenerator : EOrmIdGenerator by DefaultIdGenerator()

@@ -1,3 +1,3 @@
 dependencies {
-    implementation(project(":eorm-core"))
+    api(project(":eorm-core"))
 }
