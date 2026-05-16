@@ -25,4 +25,17 @@ class SqliteDialect : BaseDialect() {
 
     override fun getPrimaryKeyDefinition(strategy: IdStrategy): String =
         if (strategy == IdStrategy.AUTO) "PRIMARY KEY AUTOINCREMENT" else "PRIMARY KEY"
+
+    override fun buildUpsertSql(
+        tableName: String,
+        insertColumns: List<String>,
+        conflictColumns: List<String>,
+        updateColumns: List<String>
+    ): String {
+        val insertSql = buildInsertSql(tableName, insertColumns)
+        val conflict = conflictColumns.joinToString(", ")
+        if (updateColumns.isEmpty()) return "$insertSql ON CONFLICT ($conflict) DO NOTHING"
+        val updates = updateColumns.joinToString(", ") { "$it = excluded.$it" }
+        return "$insertSql ON CONFLICT ($conflict) DO UPDATE SET $updates"
+    }
 }

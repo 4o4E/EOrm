@@ -23,4 +23,24 @@ class MySqlDialect : BaseDialect() {
         }
     }
     override fun getPrimaryKeyDefinition(strategy: IdStrategy): String = if (strategy == IdStrategy.AUTO) "PRIMARY KEY AUTO_INCREMENT" else "PRIMARY KEY"
+
+    override fun getJsonSqlType(): String = "JSON"
+
+    override fun buildUpsertSql(
+        tableName: String,
+        insertColumns: List<String>,
+        conflictColumns: List<String>,
+        updateColumns: List<String>
+    ): String {
+        val insertSql = buildInsertSql(tableName, insertColumns)
+        if (updateColumns.isEmpty()) return "$insertSql ON DUPLICATE KEY UPDATE ${insertColumns.first()} = ${insertColumns.first()}"
+        val updates = updateColumns.joinToString(", ") { "$it = VALUES($it)" }
+        return "$insertSql ON DUPLICATE KEY UPDATE $updates"
+    }
+
+    override fun buildCreateIndexSql(indexName: String, tableName: String, columnNames: List<String>, unique: Boolean): String {
+        val uniqueSql = if (unique) "UNIQUE " else ""
+        val cols = columnNames.joinToString(", ")
+        return "CREATE ${uniqueSql}INDEX $indexName ON $tableName ($cols)"
+    }
 }

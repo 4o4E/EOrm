@@ -1,6 +1,8 @@
 package top.e404.eorm.executor
 
 import top.e404.eorm.dialect.SqlDialect
+import top.e404.eorm.json.JsonCodec
+import top.e404.eorm.json.JsonDbValue
 import top.e404.eorm.log.EOrmLogger
 import top.e404.eorm.log.DefaultSqlFormatter
 import top.e404.eorm.meta.MetaCache
@@ -8,7 +10,9 @@ import top.e404.eorm.mapping.NameConverter
 import top.e404.eorm.transaction.TransactionManager
 import java.lang.reflect.Field
 import java.sql.Connection
+import java.sql.PreparedStatement
 import java.sql.Statement
+import java.sql.Types
 import javax.sql.DataSource
 import java.time.LocalDateTime
 import java.time.LocalDate
@@ -75,7 +79,7 @@ class SqlExecutor(
                     dialect.prepareInsertStatement(conn, sqlTemplate, idColumnName).use { stmt ->
                         val batchSize = dialect.getInsertBatchSize()
                         for ((i, params) in paramsList.withIndex()) {
-                            params.forEachIndexed { idx, value -> stmt.setObject(idx + 1, convertParam(value)) }
+                            params.forEachIndexed { idx, value -> setParam(stmt, idx + 1, value) }
                             stmt.addBatch()
                             if ((i + 1) % batchSize == 0) stmt.executeBatch()
                         }
@@ -103,7 +107,7 @@ class SqlExecutor(
                 conn.createStatement().use { stmt -> stmt.executeQuery(finalSql).use { rs -> mapResult(rs, clazz, list, converter) } }
             } else {
                 conn.prepareStatement(sql).use { stmt ->
-                    params.forEachIndexed { index, value -> stmt.setObject(index + 1, convertParam(value)) }
+                    params.forEachIndexed { index, value -> setParam(stmt, index + 1, value) }
                     stmt.executeQuery().use { rs -> mapResult(rs, clazz, list, converter) }
                 }
             }
@@ -120,7 +124,7 @@ class SqlExecutor(
                 conn.createStatement().use { stmt -> stmt.executeQuery(finalSql).use { rs -> mapResultMap(rs, list) } }
             } else {
                 conn.prepareStatement(sql).use { stmt ->
-                    params.forEachIndexed { index, value -> stmt.setObject(index + 1, convertParam(value)) }
+                    params.forEachIndexed { index, value -> setParam(stmt, index + 1, value) }
                     stmt.executeQuery().use { rs -> mapResultMap(rs, list) }
                 }
             }
@@ -136,9 +140,27 @@ class SqlExecutor(
                 conn.createStatement().use { it.executeUpdate(finalSql) }
             } else {
                 conn.prepareStatement(sql).use { stmt ->
-                    params.forEachIndexed { index, value -> stmt.setObject(index + 1, convertParam(value)) }
+                    params.forEachIndexed { index, value -> setParam(stmt, index + 1, value) }
                     stmt.executeUpdate()
                 }
+            }
+        }
+    }
+
+    fun executeBatchUpdate(sql: String, paramsList: List<List<Any?>>): Int {
+        if (paramsList.isEmpty()) return 0
+        logger.logSql(sql, paramsList[0])
+        return withConnection { conn ->
+            conn.prepareStatement(sql).use { stmt ->
+                var affected = 0
+                for (params in paramsList) {
+                    params.forEachIndexed { index, value -> setParam(stmt, index + 1, value) }
+                    stmt.addBatch()
+                }
+                stmt.executeBatch().forEach { count ->
+                    if (count > 0) affected += count
+                }
+                affected
             }
         }
     }
@@ -151,10 +173,14 @@ class SqlExecutor(
             val instance = clazz.getDeclaredConstructor().newInstance()
             for (i in 1..colCount) {
                 val colLabel = metaData.getColumnLabel(i)
-                val field = tableMeta.fieldMap[colLabel.lowercase()]
+                val colMeta = tableMeta.columnMetaMap[colLabel.lowercase()]
+                val field = colMeta?.field
                 if (field != null) {
                     val value = rs.getObject(i)
-                    if (value != null) field.set(instance, convertType(value, field.type))
+                    if (value != null) {
+                        val converted = if (colMeta.isJson) JsonCodec.fromJsonValue(value, field.type) else convertType(value, field.type)
+                        field.set(instance, converted)
+                    }
                 }
             }
             list.add(instance)
@@ -194,9 +220,20 @@ class SqlExecutor(
 
     private fun convertParam(value: Any?): Any? = when (value) {
         null -> null
+        is JsonDbValue -> value
         is LocalDateTime -> java.sql.Timestamp.valueOf(value)
         is LocalDate -> java.sql.Date.valueOf(value)
         is LocalTime -> java.sql.Time.valueOf(value)
         else -> value
+    }
+
+    private fun setParam(stmt: PreparedStatement, index: Int, value: Any?) {
+        when (val converted = convertParam(value)) {
+            is JsonDbValue -> {
+                if (dialect.bindJsonAsOther()) stmt.setObject(index, converted.json, Types.OTHER)
+                else stmt.setObject(index, converted.json)
+            }
+            else -> stmt.setObject(index, converted)
+        }
     }
 }

@@ -6,16 +6,19 @@ import top.e404.eorm.dsl.DeleteBuilder
 import top.e404.eorm.dsl.Query
 import top.e404.eorm.dsl.SubQuery
 import top.e404.eorm.dsl.UpdateBuilder
+import top.e404.eorm.dsl.UpsertBuilder
 import top.e404.eorm.executor.SqlExecutor
 import top.e404.eorm.filler.DataFiller
 import top.e404.eorm.filler.NoOpDataFiller
 import top.e404.eorm.generator.EOrmIdGenerator
 import top.e404.eorm.generator.IdGenerator
 import top.e404.eorm.generator.IdStrategy
+import top.e404.eorm.json.JsonCodec
 import top.e404.eorm.log.ConsoleLogger
 import top.e404.eorm.log.EOrmLogger
 import top.e404.eorm.mapping.CamelToSnakeConverter
 import top.e404.eorm.mapping.NameConverter
+import top.e404.eorm.meta.ColumnMeta
 import top.e404.eorm.meta.MetaCache
 import top.e404.eorm.transaction.CoroutineTransaction
 import top.e404.eorm.transaction.TransactionManager
@@ -191,7 +194,7 @@ class EOrm(
         } else null
 
         for (batch in entities.chunked(batchSize)) {
-            val paramsList = batch.map { entity -> insertCols.map { it.field.get(entity) } }
+            val paramsList = batch.map { entity -> insertCols.map { getColumnValue(entity, it) } }
             val fieldToFill = if (idStrategy == IdStrategy.AUTO) idField else null
             executor.executeBatchInsert(sql, paramsList, batch, fieldToFill, idColumnName)
         }
@@ -217,7 +220,7 @@ class EOrm(
 
         val sql = "UPDATE $tableName SET $setClause WHERE $wrappedIdColumn = ?"
 
-        val params = updateCols.map { it.field.get(entity) } + idValue
+        val params = updateCols.map { getColumnValue(entity, it) } + idValue
 
         return executor.executeUpdate(sql, params)
     }
@@ -268,6 +271,32 @@ class EOrm(
         else -> false
     }
 
+    internal fun getColumnValue(entity: Any, columnMeta: ColumnMeta): Any? {
+        val value = columnMeta.field.get(entity)
+        return convertColumnValue(value, columnMeta)
+    }
+
+    internal fun convertColumnValue(value: Any?, columnMeta: ColumnMeta): Any? {
+        return if (columnMeta.isJson) JsonCodec.toJsonValue(value) else value
+    }
+
+    internal fun fillGeneratedIds(entities: List<Any>, meta: top.e404.eorm.meta.TableMeta) {
+        val idColumn = meta.idColumn ?: return
+        val idField = meta.fieldMap[idColumn.lowercase()] ?: return
+        val colMeta = meta.columnMetas.find { it.isId } ?: return
+        if (colMeta.idStrategy == IdStrategy.AUTO || colMeta.idStrategy == IdStrategy.MANUAL) return
+        for (entity in entities) {
+            val currentId = idField.get(entity)
+            if (isIdEmpty(currentId)) {
+                when (colMeta.idStrategy) {
+                    IdStrategy.SNOWFLAKE -> idField.set(entity, idGenerator.nextSnowflakeId())
+                    IdStrategy.UUID -> idField.set(entity, idGenerator.nextUuid())
+                    else -> {}
+                }
+            }
+        }
+    }
+
     // ==================== DDL ====================
 
     /**
@@ -277,6 +306,13 @@ class EOrm(
      * @return CREATE TABLE SQL 语句
      */
     fun generateDdl(clazz: Class<*>): String {
+        return generateDdlStatements(clazz).joinToString(";\n")
+    }
+
+    /**
+     * 根据实体类的元数据生成建表和索引 DDL 语句。
+     */
+    fun generateDdlStatements(clazz: Class<*>): List<String> {
         val meta = MetaCache.get(clazz, nameConverter)
         val sb = StringBuilder()
         val tableName = dialect.wrapName(meta.tableName)
@@ -285,7 +321,11 @@ class EOrm(
         val definitions = ArrayList<String>()
         for (colMeta in meta.columnMetas) {
             val colName = dialect.wrapName(colMeta.columnName)
-            val sqlType = dialect.getSqlType(colMeta.field.type, colMeta.length)
+            val sqlType = when {
+                colMeta.sqlType.isNotEmpty() -> colMeta.sqlType
+                colMeta.isJson -> dialect.getJsonSqlType()
+                else -> dialect.getSqlType(colMeta.field.type, colMeta.length)
+            }
             var line = "$colName $sqlType"
             if (!colMeta.nullable) line += " NOT NULL"
             if (colMeta.isId) line += " " + dialect.getPrimaryKeyDefinition(colMeta.idStrategy)
@@ -293,7 +333,14 @@ class EOrm(
         }
         sb.append(definitions.joinToString(",\n"))
         sb.append("\n)")
-        return sb.toString()
+        val statements = ArrayList<String>()
+        statements.add(sb.toString())
+        for (indexMeta in meta.indexMetas) {
+            val indexName = dialect.wrapName(indexMeta.name)
+            val columnNames = indexMeta.columns.map { dialect.wrapName(it) }
+            statements.add(dialect.buildCreateIndexSql(indexName, tableName, columnNames, indexMeta.unique))
+        }
+        return statements
     }
 
     /**
@@ -301,7 +348,9 @@ class EOrm(
      *
      * @param clazz 实体类的 Class 对象
      */
-    fun createTable(clazz: Class<*>) = executor.execute(generateDdl(clazz))
+    fun createTable(clazz: Class<*>) {
+        generateDdlStatements(clazz).forEach { executor.execute(it) }
+    }
 
     /** 根据实体类的元数据在数据库中创建表（reified 泛型重载）。 */
     inline fun <reified T> createTable() = createTable(T::class.java)
@@ -341,6 +390,16 @@ class EOrm(
 
     /** DSL 删除入口（reified 泛型重载）。 */
     inline fun <reified T> delete(): DeleteBuilder<T> = DeleteBuilder(this, T::class.java)
+
+    /**
+     * UPSERT 入口，插入单个实体或在唯一冲突时更新。
+     */
+    fun <T : Any> upsert(entity: T): UpsertBuilder<T> = upsert(listOf(entity))
+
+    /**
+     * UPSERT 入口，批量插入实体或在唯一冲突时更新。
+     */
+    fun <T : Any> upsert(entities: List<T>): UpsertBuilder<T> = UpsertBuilder(this, entities)
 
     /**
      * 创建子查询构建器，用于构建可嵌套的子查询 SQL 片段。

@@ -1,6 +1,7 @@
 package top.e404.eorm.dialect
 
 import top.e404.eorm.generator.IdStrategy
+import top.e404.eorm.json.JsonDbValue
 import java.lang.reflect.Field
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -30,6 +31,11 @@ interface SqlDialect {
      * @return SQL 类型字符串
      */
     fun getSqlType(type: Class<*>, length: Int): String
+
+    /**
+     * 获取 JSON 字段的 SQL 类型。
+     */
+    fun getJsonSqlType(): String = "TEXT"
 
     /**
      * 获取主键列的定义语句。
@@ -80,6 +86,32 @@ interface SqlDialect {
     fun buildInsertSql(tableName: String, columnNames: List<String>): String
 
     /**
+     * 构建 UPSERT SQL。
+     *
+     * @param tableName 已包装的表名
+     * @param insertColumns 已包装的插入列名
+     * @param conflictColumns 已包装的冲突列名
+     * @param updateColumns 已包装的更新列名
+     */
+    fun buildUpsertSql(
+        tableName: String,
+        insertColumns: List<String>,
+        conflictColumns: List<String>,
+        updateColumns: List<String>
+    ): String
+
+    /**
+     * 构建创建索引 SQL。
+     */
+    fun buildCreateIndexSql(indexName: String, tableName: String, columnNames: List<String>, unique: Boolean): String
+
+    /**
+     * JSON 参数是否应以 JDBC OTHER 类型传入。
+     * PostgreSQL JSONB 通常需要该行为。
+     */
+    fun bindJsonAsOther(): Boolean = false
+
+    /**
      * 为批量插入创建 PreparedStatement。
      * 默认使用 [Statement.RETURN_GENERATED_KEYS]。
      * 方言可覆写以使用特定的 generated keys 获取方式（如 Oracle 需指定列名数组）。
@@ -124,6 +156,7 @@ abstract class BaseDialect : SqlDialect {
     override fun valueToSql(value: Any?): String {
         return when (value) {
             null -> "NULL"
+            is JsonDbValue -> "'${value.json.replace("'", "''")}'"
             is Number, is Boolean -> value.toString()
             is String -> "'${value.replace("'", "''")}'"
             is Date -> "'${SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(value)}'"
@@ -148,6 +181,25 @@ abstract class BaseDialect : SqlDialect {
         val cols = columnNames.joinToString(", ")
         val placeholders = columnNames.joinToString(", ") { "?" }
         return "INSERT INTO $tableName ($cols) VALUES ($placeholders)"
+    }
+
+    override fun buildUpsertSql(
+        tableName: String,
+        insertColumns: List<String>,
+        conflictColumns: List<String>,
+        updateColumns: List<String>
+    ): String {
+        require(conflictColumns.isNotEmpty()) { "Upsert conflict columns cannot be empty" }
+        val cols = insertColumns.joinToString(", ")
+        val placeholders = insertColumns.joinToString(", ") { "?" }
+        val keys = conflictColumns.joinToString(", ")
+        return "MERGE INTO $tableName ($cols) KEY($keys) VALUES ($placeholders)"
+    }
+
+    override fun buildCreateIndexSql(indexName: String, tableName: String, columnNames: List<String>, unique: Boolean): String {
+        val uniqueSql = if (unique) "UNIQUE " else ""
+        val cols = columnNames.joinToString(", ")
+        return "CREATE ${uniqueSql}INDEX IF NOT EXISTS $indexName ON $tableName ($cols)"
     }
 
     override fun prepareInsertStatement(conn: Connection, sql: String, idColumnName: String?): PreparedStatement {

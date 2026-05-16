@@ -625,7 +625,8 @@ class UpdateBuilder<T>(
      */
     fun set(prop: KProperty1<T, *>, value: Any?): UpdateBuilder<T> {
         val colName = MetaCache.resolveColumn(prop, eOrm.nameConverter)
-        return set(colName, value)
+        val colMeta = MetaCache.get(MetaCache.resolveClass(prop), eOrm.nameConverter).columnMetaMap[colName.lowercase()]
+        return set(colName, if (colMeta != null) eOrm.convertColumnValue(value, colMeta) else value)
     }
 
     /** 设置 WHERE 条件（Java 友好的函数式接口重载）。 */

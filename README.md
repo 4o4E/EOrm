@@ -58,7 +58,8 @@ data class User(
 |---|---|---|
 | `@Table(name)` | 类 | 指定表名。不标注则使用 `NameConverter` 转换类名 |
 | `@Id(strategy)` | 字段 | 标记主键。策略：`AUTO`（自增）、`SNOWFLAKE`（雪花算法 Long）、`UUID`（32位无横线字符串）、`MANUAL`（手动赋值） |
-| `@Column(name, length, nullable)` | 字段 | 自定义列名（默认驼峰转下划线）、长度（默认255）、是否可空（默认true） |
+| `@Column(name, length, nullable, unique, sqlType, json)` | 字段 | 自定义列名、长度、是否可空、单列唯一索引、显式 SQL 类型、JSON 自动映射 |
+| `@Index / @Indexes` | 类 | 声明普通索引或唯一索引，支持复合索引 |
 | `@Transient` | 字段 | 标记不映射到数据库的字段 |
 
 ### 2. 初始化 (Initialization)
@@ -140,6 +141,61 @@ db.delete<User>()
 ```
 
 插入时会自动执行以下流程：ID 生成（Snowflake/UUID）→ DataFiller 填充 → 实体校验（非空约束、字符串长度）→ 批量执行 → 回填自增 ID。
+
+#### Upsert
+
+基于唯一索引或主键冲突执行插入或更新：
+
+```kotlin
+db.upsert(user)
+    .on(User::email)
+    .update(User::name, User::age)
+    .exec()
+```
+
+如果不显式指定 `update(...)`，默认更新所有非主键、非冲突列。
+
+#### 唯一索引
+
+单列唯一索引：
+
+```kotlin
+@Column(unique = true)
+var email: String = ""
+```
+
+复合唯一索引：
+
+```kotlin
+@Table("sys_user")
+@Index(name = "uk_tenant_email", columns = ["tenantId", "email"], unique = true)
+data class User(...)
+```
+
+#### JSON / JSONB 字段
+
+字段标记为 `json = true` 后会自动序列化和反序列化，可以直接把实体类作为 JSON 字段存储：
+
+```kotlin
+data class Profile(
+    var city: String = "",
+    var score: Int = 0
+)
+
+data class User(
+    @Id
+    var id: Long = 0,
+    @Column(json = true)
+    var profile: Profile? = null
+)
+```
+
+PostgreSQL 方言默认使用 `JSONB`，MySQL 方言默认使用 `JSON`，其他方言默认使用 `TEXT`。也可以显式指定：
+
+```kotlin
+@Column(json = true, sqlType = "VARCHAR(1000)")
+var profile: Profile? = null
+```
 
 ### 4. 强大的 DSL 查询
 

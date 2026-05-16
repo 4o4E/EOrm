@@ -2,6 +2,8 @@ package top.e404.eorm.meta
 
 import top.e404.eorm.annotations.Column
 import top.e404.eorm.annotations.Id
+import top.e404.eorm.annotations.Index
+import top.e404.eorm.annotations.Indexes
 import top.e404.eorm.annotations.Table
 import top.e404.eorm.annotations.Transient
 import top.e404.eorm.generator.IdStrategy
@@ -20,6 +22,9 @@ import kotlin.reflect.jvm.javaField
  * @param idStrategy 主键生成策略
  * @param length 列长度限制
  * @param nullable 是否允许为空
+ * @param unique 是否创建单列唯一索引
+ * @param sqlType 显式 SQL 类型
+ * @param isJson 是否按 JSON 字段处理
  */
 data class ColumnMeta(
     val columnName: String,
@@ -27,7 +32,22 @@ data class ColumnMeta(
     val isId: Boolean,
     val idStrategy: IdStrategy,
     val length: Int,
-    val nullable: Boolean
+    val nullable: Boolean,
+    val unique: Boolean,
+    val sqlType: String,
+    val isJson: Boolean
+)
+
+/**
+ * 数据库索引元数据。
+ * @param name 索引名
+ * @param columns 数据库列名列表
+ * @param unique 是否为唯一索引
+ */
+data class IndexMeta(
+    val name: String,
+    val columns: List<String>,
+    val unique: Boolean
 )
 
 /**
@@ -37,6 +57,8 @@ data class ColumnMeta(
  * @param fieldMap 列名（小写）到 Field 的映射
  * @param propMap 字段名到 Field 的映射
  * @param columnMetas 所有列的元数据列表
+ * @param columnMetaMap 列名（小写）到 ColumnMeta 的映射
+ * @param indexMetas 索引元数据列表
  * @param idColumn 主键列名，无主键时为 null
  */
 data class TableMeta(
@@ -45,6 +67,8 @@ data class TableMeta(
     val fieldMap: Map<String, Field>,
     val propMap: Map<String, Field>,
     val columnMetas: List<ColumnMeta>,
+    val columnMetaMap: Map<String, ColumnMeta>,
+    val indexMetas: List<IndexMeta>,
     val idColumn: String?
 )
 
@@ -80,6 +104,7 @@ object MetaCache {
             val fieldMap = mutableMapOf<String, Field>()
             val propMap = mutableMapOf<String, Field>()
             val columnMetas = ArrayList<ColumnMeta>()
+            val columnMetaMap = mutableMapOf<String, ColumnMeta>()
             var idCol: String? = null
             var currentCls: Class<*>? = cls
             while (currentCls != null && currentCls != Any::class.java) {
@@ -91,19 +116,52 @@ object MetaCache {
                     val colName = if (colAnn != null && colAnn.name.isNotEmpty()) colAnn.name else conv.convert(field.name)
                     val length = colAnn?.length ?: 255
                     val nullable = colAnn?.nullable ?: true
+                    val unique = colAnn?.unique ?: false
+                    val sqlType = colAnn?.sqlType ?: ""
+                    val isJson = colAnn?.json ?: false
                     val idAnn = field.getAnnotation(Id::class.java)
                     val isId = idAnn != null
                     val strategy = idAnn?.strategy ?: IdStrategy.AUTO
                     columns[field.name] = colName
                     fieldMap[colName.lowercase()] = field
                     propMap[field.name] = field
-                    columnMetas.add(ColumnMeta(colName, field, isId, strategy, length, nullable))
+                    val columnMeta = ColumnMeta(colName, field, isId, strategy, length, nullable, unique, sqlType, isJson)
+                    columnMetas.add(columnMeta)
+                    columnMetaMap[colName.lowercase()] = columnMeta
                     if (isId) idCol = colName
                 }
                 currentCls = currentCls.superclass
             }
-            TableMeta(tableName, columns, fieldMap, propMap, columnMetas, idCol)
+            val indexMetas = buildIndexMetas(cls, tableName, columns, columnMetas)
+            TableMeta(tableName, columns, fieldMap, propMap, columnMetas, columnMetaMap, indexMetas, idCol)
         }
+    }
+
+    private fun buildIndexMetas(
+        cls: Class<*>,
+        tableName: String,
+        columns: Map<String, String>,
+        columnMetas: List<ColumnMeta>
+    ): List<IndexMeta> {
+        val result = ArrayList<IndexMeta>()
+        for (columnMeta in columnMetas) {
+            if (columnMeta.unique) {
+                val name = "uk_${tableName}_${columnMeta.columnName}"
+                result.add(IndexMeta(name, listOf(columnMeta.columnName), true))
+            }
+        }
+
+        val declaredIndexes = ArrayList<Index>()
+        cls.getAnnotation(Index::class.java)?.let { declaredIndexes.add(it) }
+        cls.getAnnotation(Indexes::class.java)?.value?.let { declaredIndexes.addAll(it) }
+        declaredIndexes.forEach { index ->
+            val resolvedColumns = index.columns.map { columns[it] ?: it }
+            val prefix = if (index.unique) "uk" else "idx"
+            val name = if (index.name.isNotEmpty()) index.name else "${prefix}_${tableName}_${resolvedColumns.joinToString("_")}"
+            result.add(IndexMeta(name, resolvedColumns, index.unique))
+        }
+
+        return result.distinctBy { it.name.lowercase() }
     }
 
     /**
