@@ -7,6 +7,7 @@ import top.e404.eorm.annotations.Transient
 import top.e404.eorm.generator.IdStrategy
 import top.e404.eorm.mapping.NameConverter
 import java.lang.reflect.Field
+import java.lang.reflect.Modifier
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.reflect.KProperty1
 import kotlin.reflect.jvm.javaField
@@ -83,6 +84,7 @@ object MetaCache {
             var currentCls: Class<*>? = cls
             while (currentCls != null && currentCls != Any::class.java) {
                 for (field in currentCls.declaredFields) {
+                    if (field.isSynthetic || Modifier.isStatic(field.modifiers)) continue
                     if (field.isAnnotationPresent(Transient::class.java)) continue
                     field.isAccessible = true
                     val colAnn = field.getAnnotation(Column::class.java)

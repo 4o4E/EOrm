@@ -2,6 +2,8 @@ import java.util.Properties
 import kotlin.apply
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import org.gradle.testing.jacoco.tasks.JacocoCoverageVerification
+import org.gradle.testing.jacoco.tasks.JacocoReport
 
 plugins {
     kotlin("jvm") version "2.2.21" apply false
@@ -30,6 +32,7 @@ subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
     apply(plugin = "org.gradle.maven-publish")
     apply(plugin = "org.gradle.java-library")
+    apply(plugin = "jacoco")
 
     dependencies {
         val implementation by configurations
@@ -43,6 +46,40 @@ subprojects {
 
     tasks.withType<Test> {
         useJUnitPlatform()
+        finalizedBy("jacocoTestReport")
+    }
+
+    tasks.withType<JacocoReport>().configureEach {
+        dependsOn(tasks.withType<Test>())
+        reports {
+            xml.required.set(true)
+            html.required.set(true)
+            csv.required.set(false)
+        }
+    }
+
+    if (project.name == "eorm-core") {
+        tasks.withType<JacocoCoverageVerification>().configureEach {
+            dependsOn(tasks.withType<Test>())
+            violationRules {
+                rule {
+                    limit {
+                        counter = "LINE"
+                        value = "COVEREDRATIO"
+                        minimum = "0.90".toBigDecimal()
+                    }
+                    limit {
+                        counter = "BRANCH"
+                        value = "COVEREDRATIO"
+                        minimum = "0.65".toBigDecimal()
+                    }
+                }
+            }
+        }
+
+        tasks.named("check") {
+            dependsOn("jacocoTestCoverageVerification")
+        }
     }
 
     tasks.withType<KotlinCompile>().configureEach {
