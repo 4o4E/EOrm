@@ -15,7 +15,21 @@ interface EOrmLogger {
      * 记录普通信息。
      * @param message 日志消息
      */
+    /**
+     * 记录调试信息，适合高频正常路径。
+     * 默认转发到 info，保证旧实现兼容。
+     */
+    fun debug(message: String) = info(message)
+
     fun info(message: String)
+
+    /**
+     * 记录警告信息，适合可预期但需要关注的状态。
+     * 默认按是否有异常转发，保证旧实现兼容。
+     */
+    fun warn(message: String, e: Throwable? = null) {
+        if (e == null) info(message) else error(message, e)
+    }
 
     /**
      * 记录错误信息。
@@ -36,6 +50,8 @@ object ConsoleLogger : EOrmLogger {
             println("[EOrm] SQL: $sql | args: $args")
         }
     }
+    override fun debug(message: String) = println("[EOrm] DEBUG: $message")
     override fun info(message: String) = println("[EOrm] INFO: $message")
+    override fun warn(message: String, e: Throwable?) { println("[EOrm] WARN: $message"); e?.printStackTrace() }
     override fun error(message: String, e: Throwable?) { println("[EOrm] ERROR: $message"); e?.printStackTrace() }
 }

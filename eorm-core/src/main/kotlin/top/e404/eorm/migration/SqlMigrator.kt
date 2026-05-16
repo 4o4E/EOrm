@@ -62,7 +62,7 @@ class SqlMigrator(
                         eOrm.logger.error("Migration checksum mismatch version=${script.version} script=${script.name}", exception)
                         throw exception
                     }
-                    eOrm.logger.info("Migration skip version=${script.version} script=${script.name}")
+                    eOrm.logger.debug("Migration skip version=${script.version} script=${script.name}")
                     skipped.add(script)
                     continue
                 }

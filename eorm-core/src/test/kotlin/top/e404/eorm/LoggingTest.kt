@@ -15,15 +15,25 @@ import kotlin.test.assertTrue
 
 private class CapturingLogger : EOrmLogger {
     val sql = ArrayList<Pair<String, List<Any?>>>()
+    val debugs = ArrayList<String>()
     val infos = ArrayList<String>()
+    val warns = ArrayList<Pair<String, Throwable?>>()
     val errors = ArrayList<Pair<String, Throwable?>>()
 
     override fun logSql(sql: String, args: List<Any?>) {
         this.sql.add(sql to args)
     }
 
+    override fun debug(message: String) {
+        debugs.add(message)
+    }
+
     override fun info(message: String) {
         infos.add(message)
+    }
+
+    override fun warn(message: String, e: Throwable?) {
+        warns.add(message to e)
     }
 
     override fun error(message: String, e: Throwable?) {
@@ -62,8 +72,8 @@ class LoggingTest : BaseTest() {
             insert(TestUser(name = "Log Commit", age = 18))
         }
 
-        assertTrue(logger.infos.any { it == "Transaction begin propagation=REQUIRED" })
-        assertTrue(logger.infos.any { it == "Transaction commit propagation=REQUIRED" })
+        assertTrue(logger.debugs.any { it == "Transaction begin propagation=REQUIRED" })
+        assertTrue(logger.debugs.any { it == "Transaction commit propagation=REQUIRED" })
 
         assertThrows<RuntimeException> {
             loggedDb.transaction {
@@ -74,11 +84,18 @@ class LoggingTest : BaseTest() {
 
         assertTrue(logger.errors.any { it.first.contains("Transaction rollback due to exception") && it.second is RuntimeException })
 
+        assertThrows<IllegalStateException> {
+            loggedDb.transaction {
+                transaction(top.e404.eorm.transaction.TransactionPropagation.NEVER) {}
+            }
+        }
+        assertTrue(logger.warns.any { it.first.contains("Transaction rejected propagation=NEVER") })
+
         loggedDb.beginTransaction()
         loggedDb.rollbackTransaction()
 
-        assertTrue(logger.infos.any { it == "Manual transaction begin" })
-        assertTrue(logger.infos.any { it == "Manual transaction rollback" })
+        assertTrue(logger.debugs.any { it == "Manual transaction begin" })
+        assertTrue(logger.debugs.any { it == "Manual transaction rollback" })
     }
 
     @Test
@@ -102,7 +119,7 @@ class LoggingTest : BaseTest() {
 
         val second = loggedDb.migrator().locations(migrationDir.toString()).migrate()
         assertEquals(listOf("1"), second.skipped.map { it.version })
-        assertTrue(logger.infos.any { it.contains("Migration skip version=1") })
+        assertTrue(logger.debugs.any { it.contains("Migration skip version=1") })
         assertTrue(logger.infos.any { it == "Migration complete applied=0, skipped=1" })
 
         script.writeText("CREATE TABLE logging_migration (id BIGINT PRIMARY KEY, name VARCHAR(100));")
@@ -124,10 +141,10 @@ class LoggingTest : BaseTest() {
             )
         )
 
-        assertTrue(logger.infos.any { it == "Batch insert size: 2" })
-        assertTrue(logger.infos.any { it.contains("Batch insert affected rows: 2, batch size: 2") })
+        assertTrue(logger.debugs.any { it == "Batch insert size: 2" })
+        assertTrue(logger.debugs.any { it.contains("Batch insert affected rows: 2, batch size: 2") })
 
-        logger.infos.clear()
+        logger.debugs.clear()
         loggedDb.createTable<LoggingUpsertUser>()
         loggedDb.insert(
             listOf(
@@ -142,8 +159,8 @@ class LoggingTest : BaseTest() {
         val affected = loggedDb.upsert(users).on(LoggingUpsertUser::id).update(LoggingUpsertUser::age).exec()
 
         assertEquals(2, affected)
-        assertTrue(logger.infos.any { it.contains("Upsert execute batch size: 2") })
-        assertTrue(logger.infos.any { it.contains("Batch update affected rows: 2, batch size: 2") })
-        assertTrue(logger.infos.any { it.contains("Upsert affected rows: 2, batch size: 2") })
+        assertTrue(logger.debugs.any { it.contains("Upsert execute batch size: 2") })
+        assertTrue(logger.debugs.any { it.contains("Batch update affected rows: 2, batch size: 2") })
+        assertTrue(logger.debugs.any { it.contains("Upsert affected rows: 2, batch size: 2") })
     }
 }

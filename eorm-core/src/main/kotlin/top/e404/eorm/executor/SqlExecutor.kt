@@ -61,7 +61,7 @@ class SqlExecutor(
         idColumnName: String?
     ) {
         try {
-            logger.info("Batch insert size: ${paramsList.size}")
+            logger.debug("Batch insert size: ${paramsList.size}")
             if (useLiterals) {
                 var affected = 0
                 withConnection { conn ->
@@ -74,7 +74,7 @@ class SqlExecutor(
                         affected += countAffected(stmt.executeBatch())
                     }
                 }
-                logger.info("Batch insert affected rows: $affected, batch size: ${paramsList.size}")
+                logger.debug("Batch insert affected rows: $affected, batch size: ${paramsList.size}")
             } else {
                 if (paramsList.isNotEmpty()) logger.logSql(sqlTemplate, paramsList[0])
                 var affected = 0
@@ -94,7 +94,7 @@ class SqlExecutor(
                         }
                     }
                 }
-                logger.info("Batch insert affected rows: $affected, batch size: ${paramsList.size}")
+                logger.debug("Batch insert affected rows: $affected, batch size: ${paramsList.size}")
             }
         } catch (e: Exception) {
             logger.error("Failed to execute batch insert", e)
@@ -164,7 +164,7 @@ class SqlExecutor(
                 stmt.executeBatch().forEach { count ->
                     if (count > 0) affected += count
                 }
-                logger.info("Batch update affected rows: $affected, batch size: ${paramsList.size}")
+                logger.debug("Batch update affected rows: $affected, batch size: ${paramsList.size}")
                 affected
             }
         }

@@ -72,14 +72,14 @@ class EOrm(
         if (transactionManager.isInTransaction()) {
             return when (propagation) {
                 TransactionPropagation.REQUIRED -> {
-                    logger.info("Transaction join existing propagation=REQUIRED")
+                    logger.debug("Transaction join existing propagation=REQUIRED")
                     this.block()
                 }
                 TransactionPropagation.REQUIRES_NEW -> {
-                    logger.info("Transaction begin propagation=REQUIRES_NEW")
+                    logger.debug("Transaction begin propagation=REQUIRES_NEW")
                     try {
                         val result = transactionManager.runInNewTransaction { this.block() }
-                        logger.info("Transaction commit propagation=REQUIRES_NEW")
+                        logger.debug("Transaction commit propagation=REQUIRES_NEW")
                         result
                     } catch (e: Exception) {
                         logger.error("Transaction rollback due to exception propagation=REQUIRES_NEW", e)
@@ -87,23 +87,23 @@ class EOrm(
                     }
                 }
                 TransactionPropagation.NEVER -> {
-                    logger.error("Transaction rejected propagation=NEVER because active transaction exists", null)
+                    logger.warn("Transaction rejected propagation=NEVER because active transaction exists")
                     throw IllegalStateException("Transaction already active on current thread")
                 }
             }
         }
 
         if (propagation == TransactionPropagation.NEVER) {
-            logger.info("Transaction skipped propagation=NEVER")
+            logger.debug("Transaction skipped propagation=NEVER")
             return this.block()
         }
 
-        logger.info("Transaction begin propagation=$propagation")
+        logger.debug("Transaction begin propagation=$propagation")
         transactionManager.begin()
         return try {
             val result = this.block()
             transactionManager.commit()
-            logger.info("Transaction commit propagation=$propagation")
+            logger.debug("Transaction commit propagation=$propagation")
             result
         } catch (e: Exception) {
             transactionManager.rollback()
@@ -127,13 +127,13 @@ class EOrm(
         val conn = dataSource.connection
         conn.autoCommit = false
         val element = CoroutineTransaction(transactionManager, conn)
-        logger.info("Suspend transaction begin")
+        logger.debug("Suspend transaction begin")
         return try {
             val result = withContext(element) {
                 this@EOrm.block()
             }
             conn.commit()
-            logger.info("Suspend transaction commit")
+            logger.debug("Suspend transaction commit")
             result
         } catch (e: Exception) {
             try {
@@ -154,7 +154,7 @@ class EOrm(
      * 推荐使用 [transaction] 自动管理。
      */
     fun beginTransaction() {
-        logger.info("Manual transaction begin")
+        logger.debug("Manual transaction begin")
         transactionManager.begin()
     }
 
@@ -163,7 +163,7 @@ class EOrm(
      */
     fun commitTransaction() {
         transactionManager.commit()
-        logger.info("Manual transaction commit")
+        logger.debug("Manual transaction commit")
     }
 
     /**
@@ -171,7 +171,7 @@ class EOrm(
      */
     fun rollbackTransaction() {
         transactionManager.rollback()
-        logger.info("Manual transaction rollback")
+        logger.debug("Manual transaction rollback")
     }
 
     // ==================== CRUD ====================
