@@ -42,6 +42,7 @@ interface EOrmLogger {
 /**
  * 基于控制台输出的日志实现。
  */
+// TODO: 后续提供基于 SLF4J 的 EOrmLogger 适配器，生产环境优先交给业务项目的日志框架控制级别、格式和输出目标。
 object ConsoleLogger : EOrmLogger {
     override fun logSql(sql: String, args: List<Any?>) {
         if (args.isEmpty()) {
