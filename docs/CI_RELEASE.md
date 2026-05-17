@@ -38,16 +38,21 @@ Release 流程会执行：
 ./gradlew --no-daemon -PreleaseVersion=1.0.0 publish
 ```
 
-## GitHub Secrets
+## GitHub Packages
 
-发布 Maven 包到 Nexus 需要配置：
+Maven 包发布到 GitHub Packages。默认发布地址由 `GITHUB_REPOSITORY` 自动推导：
 
-- `NEXUS_USERNAME`：Nexus 用户名
-- `NEXUS_PASSWORD`：Nexus 密码
+```text
+https://maven.pkg.github.com/4o4E/EOrm
+```
 
-可选配置：
+Release workflow 使用 GitHub Actions 自动提供的 `GITHUB_TOKEN` 发布同仓库 package，不需要额外配置包发布 Secret。
 
-- `NEXUS_RELEASE_URL`：release 仓库地址，默认 `https://nexus.e404.top:3443/repository/maven-releases/`
-- `NEXUS_SNAPSHOT_URL`：snapshot 仓库地址，默认 `https://nexus.e404.top:3443/repository/maven-snapshots/`
+可选覆盖配置：
 
-手动触发 release 时可以关闭 `publish`，此时只会创建 GitHub Release 和上传构建产物，不会发布 Maven 包到 Nexus。
+- `github.repository` / `GITHUB_REPOSITORY`：仓库名，格式为 `owner/repo`
+- `github.packages.url` / `GITHUB_PACKAGES_URL`：GitHub Packages Maven 仓库地址
+- `github.packages.username` / `GITHUB_ACTOR`：发布用户名
+- `github.packages.token` / `GITHUB_TOKEN`：发布 token
+
+手动触发 release 时可以关闭 `publish`，此时只会创建 GitHub Release 和上传构建产物，不会发布 Maven 包到 GitHub Packages。

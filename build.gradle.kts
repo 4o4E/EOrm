@@ -26,12 +26,12 @@ fun propertyOrEnv(propertyName: String, envName: String): String {
 val releaseVersion = providers.gradleProperty("releaseVersion").orNull
     ?: providers.environmentVariable("RELEASE_VERSION").orNull
     ?: "1.0.0-SNAPSHOT"
-val nexusUsername = propertyOrEnv("nexus.username", "NEXUS_USERNAME")
-val nexusPassword = propertyOrEnv("nexus.password", "NEXUS_PASSWORD")
-val nexusSnapshotUrl = propertyOrEnv("nexus.snapshot.url", "NEXUS_SNAPSHOT_URL")
-    .ifBlank { "https://nexus.e404.top:3443/repository/maven-snapshots/" }
-val nexusReleaseUrl = propertyOrEnv("nexus.release.url", "NEXUS_RELEASE_URL")
-    .ifBlank { "https://nexus.e404.top:3443/repository/maven-releases/" }
+val githubRepository = propertyOrEnv("github.repository", "GITHUB_REPOSITORY")
+    .ifBlank { "4o4E/EOrm" }
+val githubPackagesUrl = propertyOrEnv("github.packages.url", "GITHUB_PACKAGES_URL")
+    .ifBlank { "https://maven.pkg.github.com/$githubRepository" }
+val githubPackagesUsername = propertyOrEnv("github.packages.username", "GITHUB_ACTOR")
+val githubPackagesToken = propertyOrEnv("github.packages.token", "GITHUB_TOKEN")
 
 allprojects {
     group = "top.e404.eorm"
@@ -121,11 +121,11 @@ subprojects {
     publishing {
         repositories {
             maven {
-                name = "nexus"
-                url = uri(if (rootProject.version.toString().endsWith("-SNAPSHOT")) nexusSnapshotUrl else nexusReleaseUrl)
+                name = "githubPackages"
+                url = uri(githubPackagesUrl)
                 credentials {
-                    username = nexusUsername
-                    password = nexusPassword
+                    username = githubPackagesUsername
+                    password = githubPackagesToken
                 }
             }
         }

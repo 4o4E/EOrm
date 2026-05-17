@@ -11,13 +11,14 @@ on:
         required: true
         type: string
       publish:
-        description: "是否发布 Maven 包到 Nexus"
+        description: "是否发布 Maven 包到 GitHub Packages"
         required: true
         default: true
         type: boolean
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   release:
@@ -69,19 +70,11 @@ jobs:
         shell: bash
         env:
           PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
-          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
-          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
-          NEXUS_RELEASE_URL: ${{ secrets.NEXUS_RELEASE_URL }}
-          NEXUS_SNAPSHOT_URL: ${{ secrets.NEXUS_SNAPSHOT_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           if [[ "${PUBLISH}" != "true" ]]; then
             echo "Skip Maven publish"
             exit 0
-          fi
-
-          if [[ -z "${NEXUS_USERNAME}" || -z "${NEXUS_PASSWORD}" ]]; then
-            echo "NEXUS_USERNAME and NEXUS_PASSWORD secrets are required for Maven publish" >&2
-            exit 1
           fi
 
           ./gradlew --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }} publish

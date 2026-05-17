@@ -18,7 +18,7 @@
 
 ```kotlin
 repositories {
-    maven("https://nexus.e404.top:3443/repository/maven-snapshots/")
+    maven("https://maven.pkg.github.com/4o4E/EOrm")
 }
 
 dependencies {
