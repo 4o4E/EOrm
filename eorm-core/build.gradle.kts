@@ -3,6 +3,7 @@ plugins {
 }
 
 dependencies {
+    api("org.slf4j:slf4j-api:2.0.16")
     implementation("com.zaxxer:HikariCP:4.0.3")
     implementation(kotlin("reflect"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")

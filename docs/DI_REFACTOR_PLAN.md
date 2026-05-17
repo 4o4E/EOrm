@@ -497,7 +497,7 @@ val meta = metaRegistry.get(clazz, nameConverter)
 
 ### 方案
 
-保留 `EOrmLogger` 接口，但提供更适合生产的实现入口，例如 slf4j adapter。核心库也应避免直接 `printStackTrace()`，统一通过 logger 记录或直接抛出。
+保留 `EOrmLogger` 接口，并提供 `Slf4jEOrmLogger` 作为生产环境适配入口。核心库也应避免直接 `printStackTrace()`，统一通过 logger 记录或直接抛出。
 
 改造前：
 
@@ -664,7 +664,7 @@ single {
 5. 引入 `EOrmIdGenerator`，替换全局 `IdGenerator` 直接调用。
 6. 引入事务传播策略，优先支持 `REQUIRED`。
 7. 引入 `MetaRegistry`，让元数据缓存可清理、可替换。
-8. 提供 slf4j logger adapter，并移除核心代码中的 `printStackTrace()`。
+8. 已提供 `Slf4jEOrmLogger`，并移除核心业务路径中的直接 `printStackTrace()`。
 
 ## 验收标准
 
