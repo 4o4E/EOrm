@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "发布版本号，例如 1.0.0"
+        required: true
+        type: string
+      publish:
+        description: "是否发布 Maven 包到 Nexus"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#v}"
+          else
+            version="${{ inputs.version }}"
+            tag="v${version}"
+          fi
+
+          if [[ -z "${version}" ]]; then
+            echo "Release version is empty" >&2
+            exit 1
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run tests and coverage verification
+        run: ./gradlew --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }} check jacocoTestReport
+
+      - name: Build release artifacts
+        run: ./gradlew --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }} assemble sourcesJar
+
+      - name: Publish Maven packages
+        shell: bash
+        env:
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+          NEXUS_RELEASE_URL: ${{ secrets.NEXUS_RELEASE_URL }}
+          NEXUS_SNAPSHOT_URL: ${{ secrets.NEXUS_SNAPSHOT_URL }}
+        run: |
+          if [[ "${PUBLISH}" != "true" ]]; then
+            echo "Skip Maven publish"
+            exit 0
+          fi
+
+          if [[ -z "${NEXUS_USERNAME}" || -z "${NEXUS_PASSWORD}" ]]; then
+            echo "NEXUS_USERNAME and NEXUS_PASSWORD secrets are required for Maven publish" >&2
+            exit 1
+          fi
+
+          ./gradlew --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }} publish
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: eorm-${{ steps.version.outputs.version }}-artifacts
+          path: |
+            eorm-*/build/libs/*.jar
+            **/build/reports/tests/
+            **/build/reports/jacoco/
+          if-no-files-found: error
+
+      - name: Create or update GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          artifacts=(eorm-*/build/libs/*.jar)
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${artifacts[@]}" --clobber
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            gh release create "${TAG}" "${artifacts[@]}" --title "${TAG}" --generate-notes --verify-tag
+          else
+            gh release create "${TAG}" "${artifacts[@]}" --title "${TAG}" --generate-notes --target "${GITHUB_SHA}"
+          fi

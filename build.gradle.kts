@@ -11,22 +11,36 @@ plugins {
     `java-library`
 }
 
-allprojects {
-    group = "top.e404.eorm"
-    version = "1.0.0-SNAPSHOT"
-
-    repositories {
-        mavenCentral()
-    }
-}
-
 val local = Properties().apply {
     val file = projectDir.resolve("local.properties")
     if (file.exists()) file.bufferedReader().use { load(it) }
 }
 
-val nexusUsername get() = local.getProperty("nexus.username") ?: ""
-val nexusPassword get() = local.getProperty("nexus.password") ?: ""
+fun propertyOrEnv(propertyName: String, envName: String): String {
+    return providers.gradleProperty(propertyName).orNull
+        ?: providers.environmentVariable(envName).orNull
+        ?: local.getProperty(propertyName)
+        ?: ""
+}
+
+val releaseVersion = providers.gradleProperty("releaseVersion").orNull
+    ?: providers.environmentVariable("RELEASE_VERSION").orNull
+    ?: "1.0.0-SNAPSHOT"
+val nexusUsername = propertyOrEnv("nexus.username", "NEXUS_USERNAME")
+val nexusPassword = propertyOrEnv("nexus.password", "NEXUS_PASSWORD")
+val nexusSnapshotUrl = propertyOrEnv("nexus.snapshot.url", "NEXUS_SNAPSHOT_URL")
+    .ifBlank { "https://nexus.e404.top:3443/repository/maven-snapshots/" }
+val nexusReleaseUrl = propertyOrEnv("nexus.release.url", "NEXUS_RELEASE_URL")
+    .ifBlank { "https://nexus.e404.top:3443/repository/maven-releases/" }
+
+allprojects {
+    group = "top.e404.eorm"
+    version = releaseVersion
+
+    repositories {
+        mavenCentral()
+    }
+}
 
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
@@ -107,8 +121,8 @@ subprojects {
     publishing {
         repositories {
             maven {
-                name = "snapshot"
-                url = uri("https://nexus.e404.top:3443/repository/maven-snapshots/")
+                name = "nexus"
+                url = uri(if (rootProject.version.toString().endsWith("-SNAPSHOT")) nexusSnapshotUrl else nexusReleaseUrl)
                 credentials {
                     username = nexusUsername
                     password = nexusPassword
