@@ -18,7 +18,16 @@
 
 ```kotlin
 repositories {
-    maven("https://maven.pkg.github.com/4o4E/EOrm")
+    mavenCentral()
+    maven("https://central.sonatype.com/repository/maven-snapshots/") {
+        mavenContent { snapshotsOnly() }
+    }
+    maven("https://nexus.e404.top:3443/repository/maven-releases/") {
+        mavenContent { releasesOnly() }
+    }
+    maven("https://nexus.e404.top:3443/repository/maven-snapshots/") {
+        mavenContent { snapshotsOnly() }
+    }
 }
 
 dependencies {

@@ -1,5 +1,6 @@
 import java.util.Properties
 import kotlin.apply
+import com.vanniktech.maven.publish.MavenPublishBaseExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import org.gradle.testing.jacoco.tasks.JacocoCoverageVerification
@@ -7,6 +8,7 @@ import org.gradle.testing.jacoco.tasks.JacocoReport
 
 plugins {
     kotlin("jvm") version "2.2.21" apply false
+    id("com.vanniktech.maven.publish") version "0.36.0" apply false
     publishing
     `java-library`
 }
@@ -28,10 +30,15 @@ val releaseVersion = providers.gradleProperty("releaseVersion").orNull
     ?: "1.0.0-SNAPSHOT"
 val githubRepository = propertyOrEnv("github.repository", "GITHUB_REPOSITORY")
     .ifBlank { "4o4E/EOrm" }
-val githubPackagesUrl = propertyOrEnv("github.packages.url", "GITHUB_PACKAGES_URL")
-    .ifBlank { "https://maven.pkg.github.com/$githubRepository" }
-val githubPackagesUsername = propertyOrEnv("github.packages.username", "GITHUB_ACTOR")
-val githubPackagesToken = propertyOrEnv("github.packages.token", "GITHUB_TOKEN")
+val githubUrl = "https://github.com/$githubRepository"
+val nexusReleasesUrl = propertyOrEnv("nexus.releases.url", "NEXUS_RELEASES_URL")
+    .ifBlank { "https://nexus.e404.top:3443/repository/maven-releases/" }
+val nexusSnapshotsUrl = propertyOrEnv("nexus.snapshots.url", "NEXUS_SNAPSHOTS_URL")
+    .ifBlank { "https://nexus.e404.top:3443/repository/maven-snapshots/" }
+val nexusUsername = propertyOrEnv("nexus.username", "NEXUS_USERNAME")
+val nexusPassword = propertyOrEnv("nexus.password", "NEXUS_PASSWORD")
+val hasSigningKey = propertyOrEnv("signingInMemoryKey", "SIGNING_KEY").isNotBlank()
+val isSnapshotVersion = releaseVersion.endsWith("-SNAPSHOT")
 
 allprojects {
     group = "top.e404.eorm"
@@ -46,6 +53,7 @@ subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
     apply(plugin = "org.gradle.maven-publish")
     apply(plugin = "org.gradle.java-library")
+    apply(plugin = "com.vanniktech.maven.publish")
     apply(plugin = "jacoco")
 
     dependencies {
@@ -108,24 +116,49 @@ subprojects {
         targetCompatibility = JavaVersion.VERSION_1_8
     }
 
-    afterEvaluate {
-        publishing.publications.create<MavenPublication>("java") {
-            from(components["kotlin"])
-            artifact(tasks.getByName("sourcesJar"))
-            artifactId = project.name
-            groupId = rootProject.group.toString()
-            version = rootProject.version.toString()
+    configure<MavenPublishBaseExtension> {
+        publishToMavenCentral()
+        if (hasSigningKey) signAllPublications()
+
+        coordinates(rootProject.group.toString(), project.name, rootProject.version.toString())
+
+        pom {
+            name.set(project.name)
+            description.set("${project.name} module for EOrm")
+            url.set(githubUrl)
+            licenses {
+                license {
+                    name.set("GNU GPLv3")
+                    url.set("https://www.gnu.org/licenses/gpl-3.0.en.html")
+                    distribution.set("repo")
+                }
+            }
+            developers {
+                developer {
+                    id.set("4o4E")
+                    name.set("4o4E")
+                    email.set("4o4E@users.noreply.github.com")
+                    organization.set("4o4E")
+                    organizationUrl.set("https://github.com/4o4E")
+                    url.set("https://github.com/4o4E")
+                }
+            }
+            scm {
+                url.set(githubUrl)
+                connection.set("scm:git:git://github.com/$githubRepository.git")
+                developerConnection.set("scm:git:ssh://git@github.com/$githubRepository.git")
+            }
         }
     }
 
     publishing {
         repositories {
             maven {
-                name = "githubPackages"
-                url = uri(githubPackagesUrl)
+                name = "nexus"
+                url = uri(if (isSnapshotVersion) nexusSnapshotsUrl else nexusReleasesUrl)
                 credentials {
-                    username = githubPackagesUsername
-                    password = githubPackagesToken
+                    username = nexusUsername
+                    password = nexusPassword
                 }
             }
         }

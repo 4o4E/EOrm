@@ -11,14 +11,13 @@ on:
         required: true
         type: string
       publish:
-        description: "是否发布 Maven 包到 GitHub Packages"
+        description: "是否发布 Maven 包到 Nexus 和 Maven Central"
         required: true
         default: true
         type: boolean
 
 permissions:
   contents: write
-  packages: write
 
 jobs:
   release:
@@ -65,7 +64,13 @@ jobs:
         shell: bash
         env:
           PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
-          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}
+          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
         run: |
           tasks=(check)
 
@@ -73,10 +78,15 @@ jobs:
             echo "Skip Maven publish, build local artifacts only"
             tasks+=(assemble sourcesJar)
           else
-            tasks+=(publish)
+            tasks+=(publishAllPublicationsToNexusRepository)
+            if [[ "${RELEASE_VERSION}" == *-SNAPSHOT ]]; then
+              tasks+=(publishToMavenCentral)
+            else
+              tasks+=(publishAndReleaseToMavenCentral)
+            fi
           fi
 
-          ./gradlew --no-daemon --parallel --build-cache -PreleaseVersion=${{ steps.version.outputs.version }} "${tasks[@]}"
+          ./gradlew --no-daemon --build-cache -PreleaseVersion="${RELEASE_VERSION}" "${tasks[@]}"
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
