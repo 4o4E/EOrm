@@ -76,7 +76,7 @@ class SqlExecutor(
                 }
                 logger.debug("Batch insert affected rows: $affected, batch size: ${paramsList.size}")
             } else {
-                if (paramsList.isNotEmpty()) logger.logSql(sqlTemplate, paramsList[0])
+                logBatchSql(sqlTemplate, paramsList)
                 var affected = 0
                 withConnection { conn ->
                     dialect.prepareInsertStatement(conn, sqlTemplate, idColumnName).use { stmt ->
@@ -153,7 +153,7 @@ class SqlExecutor(
 
     fun executeBatchUpdate(sql: String, paramsList: List<List<Any?>>): Int {
         if (paramsList.isEmpty()) return 0
-        logger.logSql(sql, paramsList[0])
+        logBatchSql(sql, paramsList)
         return withConnection { conn ->
             conn.prepareStatement(sql).use { stmt ->
                 var affected = 0
@@ -168,6 +168,10 @@ class SqlExecutor(
                 affected
             }
         }
+    }
+
+    private fun logBatchSql(sql: String, paramsList: List<List<Any?>>) {
+        paramsList.forEach { params -> logger.logSql(sql, params) }
     }
 
     private fun countAffected(results: IntArray): Int {

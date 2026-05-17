@@ -134,6 +134,7 @@ class LoggingTest : BaseTest() {
 
     @Test
     fun `batch insert and upsert log execution stats`() {
+        logger.sql.clear()
         loggedDb.insert(
             listOf(
                 TestUser(name = "Batch A", age = 20),
@@ -143,6 +144,10 @@ class LoggingTest : BaseTest() {
 
         assertTrue(logger.debugs.any { it == "Batch insert size: 2" })
         assertTrue(logger.debugs.any { it.contains("Batch insert affected rows: 2, batch size: 2") })
+        val insertLogs = logger.sql.filter { it.first.startsWith("INSERT INTO") }
+        assertEquals(2, insertLogs.size)
+        assertTrue(insertLogs.any { it.second.contains("Batch A") })
+        assertTrue(insertLogs.any { it.second.contains("Batch B") })
 
         logger.debugs.clear()
         loggedDb.createTable<LoggingUpsertUser>()
@@ -156,9 +161,14 @@ class LoggingTest : BaseTest() {
         users[0].age = 30
         users[1].age = 31
 
+        logger.sql.clear()
         val affected = loggedDb.upsert(users).on(LoggingUpsertUser::id).update(LoggingUpsertUser::age).exec()
 
         assertEquals(2, affected)
+        val upsertLogs = logger.sql.filter { it.first.startsWith("MERGE INTO") }
+        assertEquals(2, upsertLogs.size)
+        assertTrue(upsertLogs.any { it.second.contains("Upsert A") })
+        assertTrue(upsertLogs.any { it.second.contains("Upsert B") })
         assertTrue(logger.debugs.any { it.contains("Upsert execute batch size: 2") })
         assertTrue(logger.debugs.any { it.contains("Batch update affected rows: 2, batch size: 2") })
         assertTrue(logger.debugs.any { it.contains("Upsert affected rows: 2, batch size: 2") })
