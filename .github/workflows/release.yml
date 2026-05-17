@@ -23,6 +23,7 @@ permissions:
 jobs:
   release:
     name: Release
+    timeout-minutes: 30
     runs-on: ubuntu-latest
 
     steps:
@@ -60,24 +61,22 @@ jobs:
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
 
-      - name: Run tests and coverage verification
-        run: ./gradlew --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }} check jacocoTestReport
-
-      - name: Build release artifacts
-        run: ./gradlew --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }} assemble sourcesJar
-
-      - name: Publish Maven packages
+      - name: Build, test and publish Maven packages
         shell: bash
         env:
           PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          tasks=(check)
+
           if [[ "${PUBLISH}" != "true" ]]; then
-            echo "Skip Maven publish"
-            exit 0
+            echo "Skip Maven publish, build local artifacts only"
+            tasks+=(assemble sourcesJar)
+          else
+            tasks+=(publish)
           fi
 
-          ./gradlew --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }} publish
+          ./gradlew --no-daemon --parallel --build-cache -PreleaseVersion=${{ steps.version.outputs.version }} "${tasks[@]}"
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4

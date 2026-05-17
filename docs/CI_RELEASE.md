@@ -11,7 +11,7 @@
 执行命令：
 
 ```bash
-./gradlew --no-daemon check jacocoTestReport
+./gradlew --no-daemon --parallel --build-cache --configuration-cache check
 ```
 
 测试报告和 JaCoCo 覆盖率报告会作为 workflow artifact 上传。
@@ -33,9 +33,7 @@ git push origin v1.0.0
 Release 流程会执行：
 
 ```bash
-./gradlew --no-daemon -PreleaseVersion=1.0.0 check jacocoTestReport
-./gradlew --no-daemon -PreleaseVersion=1.0.0 assemble sourcesJar
-./gradlew --no-daemon -PreleaseVersion=1.0.0 publish
+./gradlew --no-daemon --parallel --build-cache -PreleaseVersion=1.0.0 check publish
 ```
 
 ## GitHub Packages
