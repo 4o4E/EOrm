@@ -22,12 +22,6 @@ repositories {
     maven("https://central.sonatype.com/repository/maven-snapshots/") {
         mavenContent { snapshotsOnly() }
     }
-    maven("https://nexus.e404.top:3443/repository/maven-releases/") {
-        mavenContent { releasesOnly() }
-    }
-    maven("https://nexus.e404.top:3443/repository/maven-snapshots/") {
-        mavenContent { snapshotsOnly() }
-    }
 }
 
 dependencies {
@@ -37,6 +31,8 @@ dependencies {
     implementation("top.e404.eorm:eorm-dialect-mysql:1.0.0-SNAPSHOT")
 }
 ```
+
+`central.sonatype.com` 中显示 `PUBLISHED` 表示包已经通过 Sonatype Central Portal 发布。正式版本通过 `mavenCentral()` 引入；`-SNAPSHOT` 版本不会进入 `mavenCentral()`，需要额外配置上面的 Sonatype snapshot 仓库。
 
 ### 1. 定义实体 (Entity)
 
