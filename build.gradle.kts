@@ -1,5 +1,3 @@
-import java.util.Properties
-import kotlin.apply
 import com.vanniktech.maven.publish.MavenPublishBaseExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
@@ -13,15 +11,9 @@ plugins {
     `java-library`
 }
 
-val local = Properties().apply {
-    val file = projectDir.resolve("local.properties")
-    if (file.exists()) file.bufferedReader().use { load(it) }
-}
-
 fun propertyOrEnv(propertyName: String, envName: String): String {
     return providers.gradleProperty(propertyName).orNull
         ?: providers.environmentVariable(envName).orNull
-        ?: local.getProperty(propertyName)
         ?: ""
 }
 
