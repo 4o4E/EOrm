@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "[0-9]*"
   workflow_dispatch:
     inputs:
       version:
@@ -46,14 +46,19 @@ jobs:
         run: |
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             tag="${GITHUB_REF_NAME}"
-            version="${tag#v}"
+            version="${tag}"
           else
             version="${{ inputs.version }}"
-            tag="v${version}"
+            tag="${version}"
           fi
 
           if [[ -z "${version}" ]]; then
             echo "Release version is empty" >&2
+            exit 1
+          fi
+
+          if [[ "${version}" == v* ]]; then
+            echo "Release tag must not use v prefix: ${version}" >&2
             exit 1
           fi
 
@@ -77,6 +82,9 @@ jobs:
           if [[ "${PUBLISH}" != "true" ]]; then
             echo "Skip Maven publish, build local artifacts only"
             tasks+=(assemble sourcesJar)
+          elif [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "Maven Central publish must run from a git tag without v prefix" >&2
+            exit 1
           else
             tasks+=(publishAllPublicationsToNexusRepository)
             if [[ "${RELEASE_VERSION}" == *-SNAPSHOT ]]; then
@@ -86,7 +94,7 @@ jobs:
             fi
           fi
 
-          ./gradlew --no-daemon --build-cache -PreleaseVersion="${RELEASE_VERSION}" "${tasks[@]}"
+          ./gradlew --no-daemon --build-cache "${tasks[@]}"
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
