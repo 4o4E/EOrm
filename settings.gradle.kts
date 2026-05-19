@@ -1,6 +1,8 @@
 rootProject.name = "EOrm"
-include("eorm-core")
-include("eorm-dialect-mysql")
-include("eorm-dialect-postgres")
-include("eorm-dialect-sqlite")
-include("eorm-dialect-h2")
+include(
+    "eorm-core",
+    "eorm-dialect-mysql",
+    "eorm-dialect-postgres",
+    "eorm-dialect-sqlite",
+    "eorm-dialect-h2"
+)
