@@ -88,7 +88,7 @@ jobs:
           else
             tasks+=(publishAllPublicationsToNexusRepository)
             if [[ "${RELEASE_VERSION}" == *-SNAPSHOT ]]; then
-              tasks+=(publishToMavenCentral)
+              echo "Snapshot version only publishes to Nexus"
             else
               tasks+=(publishAndReleaseToMavenCentral)
             fi
