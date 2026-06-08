@@ -6,10 +6,16 @@ import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 import top.e404.eorm.migration.SqlMigrator
 import top.e404.eorm.migration.SqlScriptParser
+import java.net.JarURLConnection
+import java.net.URL
 import java.net.URLClassLoader
+import java.net.URLConnection
+import java.net.URLStreamHandler
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
+import java.util.Collections
 import java.util.jar.JarEntry
+import java.util.jar.JarFile
 import java.util.jar.JarOutputStream
 import kotlin.io.path.writeText
 import kotlin.test.assertEquals
@@ -157,6 +163,34 @@ class MigrationTest : BaseTest() {
     }
 
     @Test
+    fun `migrator accepts nested jar resource urls without path filesystem`() {
+        val jar = migrationDir.resolve("nested_resource.jar")
+        writeMigrationJar(jar, includeDirectoryEntry = true)
+        val nestedJarFileUrl = URL(
+            null,
+            "jar:file:/outer.jar!/coursier/bootstrap/launcher/jars/Bot-app.jar!/",
+            NoopUrlHandler
+        )
+        val nestedUrl = URL(
+            null,
+            "jar:jar:file:/outer.jar!/coursier/bootstrap/launcher/jars/Bot-app.jar!/db/migration/",
+            NestedJarUrlHandler(jar, nestedJarFileUrl)
+        )
+        val classLoader = object : ClassLoader(null) {
+            override fun getResources(name: String) =
+                if (name == "db/migration/") Collections.enumeration(listOf(nestedUrl))
+                else Collections.emptyEnumeration()
+        }
+
+        val result = SqlMigrator(db, classLoader)
+            .locations("classpath:db/migration")
+            .migrate()
+
+        assertEquals(listOf("1", "2"), result.applied.map { it.version })
+        assertEquals(2, db.executor.queryMap("SELECT * FROM migration_user", emptyList()).size)
+    }
+
+    @Test
     fun `migrator rejects invalid file names`() {
         migrationDir.resolve("001_create_bad.sql").writeText("SELECT 1;")
 
@@ -185,6 +219,25 @@ class MigrationTest : BaseTest() {
                 """.trimIndent().toByteArray(StandardCharsets.UTF_8)
             )
             output.closeEntry()
+        }
+    }
+
+    private class NestedJarUrlHandler(
+        private val jar: Path,
+        private val jarFileUrl: URL,
+    ) : URLStreamHandler() {
+        override fun openConnection(url: URL): URLConnection {
+            return object : JarURLConnection(URL("jar:file:/outer.jar!/db/migration/")) {
+                override fun connect() = Unit
+                override fun getJarFileURL(): URL = jarFileUrl
+                override fun getJarFile(): JarFile = JarFile(jar.toFile())
+            }
+        }
+    }
+
+    private object NoopUrlHandler : URLStreamHandler() {
+        override fun openConnection(url: URL): URLConnection {
+            throw UnsupportedOperationException("测试用 URL 不需要打开连接")
         }
     }
 }

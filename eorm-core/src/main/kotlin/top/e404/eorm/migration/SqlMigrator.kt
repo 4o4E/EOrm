@@ -164,13 +164,22 @@ class SqlMigrator(
             "jar" -> {
                 val connection = url.openConnection()
                 require(connection is JarURLConnection) { "Invalid jar classpath migration location: $location" }
-                val jarPath = Paths.get(connection.jarFileURL.toURI()).toAbsolutePath().normalize()
                 val entryName = connection.entryName?.trimEnd('/')
                     ?: throw IllegalArgumentException("Jar migration location is missing entry name: $location")
-                ClasspathScriptSource("jar:${jarPath.toRealPathIfExists()}!/$entryName") { loadJarDirectory(location, url) }
+                ClasspathScriptSource(jarSourceKey(connection, entryName)) { loadJarDirectory(location, url) }
             }
             else -> throw IllegalArgumentException("Unsupported classpath migration location protocol ${url.protocol}: $location")
         }
+    }
+
+    private fun jarSourceKey(connection: JarURLConnection, entryName: String): String {
+        val jarFileUrl = connection.jarFileURL
+        val jarKey = if (jarFileUrl.protocol == "file") {
+            Paths.get(jarFileUrl.toURI()).toAbsolutePath().normalize().toRealPathIfExists().toString()
+        } else {
+            jarFileUrl.toExternalForm()
+        }
+        return "jar:$jarKey!/$entryName"
     }
 
     private fun loadJarDirectory(location: String, url: URL): List<MigrationScript> {
