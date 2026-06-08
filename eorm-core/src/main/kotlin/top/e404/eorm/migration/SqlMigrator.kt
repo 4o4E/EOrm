@@ -1,14 +1,20 @@
 package top.e404.eorm.migration
 
 import top.e404.eorm.EOrm
-import java.net.URLDecoder
+import java.io.File
+import java.net.JarURLConnection
+import java.net.URL
+import java.net.URLClassLoader
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.security.MessageDigest
 import java.time.LocalDateTime
+import java.util.Collections
 import java.util.stream.Collectors
+import java.util.jar.JarEntry
+import java.util.jar.JarFile
 import kotlin.io.path.isDirectory
 import kotlin.io.path.name
 import kotlin.io.path.readText
@@ -129,14 +135,104 @@ class SqlMigrator(
 
     private fun loadLocation(location: String): List<MigrationScript> {
         return if (location.startsWith("classpath:")) {
-            val resource = location.removePrefix("classpath:").trimStart('/')
-            val url = classLoader.getResource(resource) ?: throw IllegalArgumentException("Migration location not found: $location")
-            if (url.protocol != "file") {
-                throw IllegalArgumentException("Only file based classpath migration directories are supported: $location")
-            }
-            loadDirectory(Paths.get(URLDecoder.decode(url.path, StandardCharsets.UTF_8.name())))
+            loadClasspathLocation(location)
         } else {
             loadDirectory(Paths.get(location))
+        }
+    }
+
+    private fun loadClasspathLocation(location: String): List<MigrationScript> {
+        val resource = location.removePrefix("classpath:").trimStart('/').trimEnd('/')
+        val candidates = if (resource.isEmpty()) listOf(resource) else listOf(resource, "$resource/")
+        val sources = LinkedHashMap<String, ClasspathScriptSource>()
+        candidates
+            .flatMap { Collections.list(classLoader.getResources(it)) }
+            .map { classpathUrlSource(location, it) }
+            .forEach { sources.putIfAbsent(it.key, it) }
+        fallbackClasspathSources(resource)
+            .forEach { sources.putIfAbsent(it.key, it) }
+        require(sources.isNotEmpty()) { "Migration location not found: $location" }
+        return sources.values.flatMap { it.load() }
+    }
+
+    private fun classpathUrlSource(location: String, url: URL): ClasspathScriptSource {
+        return when (url.protocol) {
+            "file" -> {
+                val path = Paths.get(url.toURI()).toAbsolutePath().normalize()
+                ClasspathScriptSource("file:${path.toRealPathIfExists()}") { loadDirectory(path) }
+            }
+            "jar" -> {
+                val connection = url.openConnection()
+                require(connection is JarURLConnection) { "Invalid jar classpath migration location: $location" }
+                val jarPath = Paths.get(connection.jarFileURL.toURI()).toAbsolutePath().normalize()
+                val entryName = connection.entryName?.trimEnd('/')
+                    ?: throw IllegalArgumentException("Jar migration location is missing entry name: $location")
+                ClasspathScriptSource("jar:${jarPath.toRealPathIfExists()}!/$entryName") { loadJarDirectory(location, url) }
+            }
+            else -> throw IllegalArgumentException("Unsupported classpath migration location protocol ${url.protocol}: $location")
+        }
+    }
+
+    private fun loadJarDirectory(location: String, url: URL): List<MigrationScript> {
+        val connection = url.openConnection()
+        require(connection is JarURLConnection) { "Invalid jar classpath migration location: $location" }
+        connection.useCaches = false
+        val entryName = connection.entryName?.trimEnd('/')
+            ?: throw IllegalArgumentException("Jar migration location is missing entry name: $location")
+        val prefix = "$entryName/"
+        return connection.jarFile.use { jarFile ->
+            Collections.list(jarFile.entries())
+                .filter { isDirectSqlEntry(it, prefix) }
+                .map { parseJarEntry(jarFile, it, prefix) }
+        }
+    }
+
+    private fun fallbackClasspathSources(resource: String): List<ClasspathScriptSource> {
+        return classpathRootUrls().mapNotNull { url ->
+            if (url.protocol != "file") return@mapNotNull null
+            val path = Paths.get(url.toURI()).toAbsolutePath().normalize()
+            when {
+                path.isDirectory() -> fallbackDirectorySource(path, resource)
+                Files.isRegularFile(path) && path.name.endsWith(".jar", ignoreCase = true) -> fallbackJarSource(path, resource)
+                else -> null
+            }
+        }
+    }
+
+    private fun classpathRootUrls(): List<URL> {
+        val result = ArrayList<URL>()
+        var loader: ClassLoader? = classLoader
+        while (loader != null) {
+            if (loader is URLClassLoader) result.addAll(loader.urLs)
+            loader = loader.parent
+        }
+        System.getProperty("java.class.path")
+            ?.split(File.pathSeparator)
+            ?.filter { it.isNotBlank() }
+            ?.map { Paths.get(it).toUri().toURL() }
+            ?.let { result.addAll(it) }
+        return result.distinctBy { it.toExternalForm() }
+    }
+
+    private fun fallbackDirectorySource(root: Path, resource: String): ClasspathScriptSource? {
+        val path = if (resource.isEmpty()) root else root.resolve(resource)
+        if (!path.isDirectory()) return null
+        return ClasspathScriptSource("file:${path.toRealPathIfExists()}") { loadDirectory(path) }
+    }
+
+    private fun fallbackJarSource(jar: Path, resource: String): ClasspathScriptSource? {
+        val prefix = if (resource.isEmpty()) "" else "$resource/"
+        if (!jarContainsDirectSqlEntry(jar, prefix)) return null
+        return ClasspathScriptSource("jar:${jar.toRealPathIfExists()}!/${resource.trimEnd('/')}") {
+            loadJarFileDirectory(jar, prefix)
+        }
+    }
+
+    private fun loadJarFileDirectory(jar: Path, prefix: String): List<MigrationScript> {
+        return JarFile(jar.toFile()).use { jarFile ->
+            Collections.list(jarFile.entries())
+                .filter { isDirectSqlEntry(it, prefix) }
+                .map { parseJarEntry(jarFile, it, prefix) }
         }
     }
 
@@ -151,12 +247,36 @@ class SqlMigrator(
     }
 
     private fun parseFile(path: Path): MigrationScript {
-        val match = FILE_PATTERN.matchEntire(path.name)
-            ?: throw IllegalArgumentException("Invalid migration filename: ${path.name}. Expected V<version>__<description>.sql")
+        return parseScript(path.name, path.readText())
+    }
+
+    private fun parseJarEntry(jarFile: JarFile, entry: JarEntry, prefix: String): MigrationScript {
+        val name = entry.name.removePrefix(prefix)
+        val sql = jarFile.getInputStream(entry).use { input -> String(input.readBytes(), StandardCharsets.UTF_8) }
+        return parseScript(name, sql)
+    }
+
+    private fun parseScript(name: String, sql: String): MigrationScript {
+        val match = FILE_PATTERN.matchEntire(name)
+            ?: throw IllegalArgumentException("Invalid migration filename: $name. Expected V<version>__<description>.sql")
         val version = match.groupValues[1]
         val description = match.groupValues[2].removeSuffix(".sql").replace('_', ' ')
-        return MigrationScript(version, description, path.name, path.readText())
+        return MigrationScript(version, description, name, sql)
     }
+
+    private fun isDirectSqlEntry(entry: JarEntry, prefix: String): Boolean {
+        if (entry.isDirectory || !entry.name.startsWith(prefix)) return false
+        val relative = entry.name.removePrefix(prefix)
+        return relative.isNotEmpty() && !relative.contains("/") && relative.endsWith(".sql", ignoreCase = true)
+    }
+
+    private fun jarContainsDirectSqlEntry(jar: Path, prefix: String): Boolean {
+        return JarFile(jar.toFile()).use { jarFile ->
+            Collections.list(jarFile.entries()).any { isDirectSqlEntry(it, prefix) }
+        }
+    }
+
+    private fun Path.toRealPathIfExists(): Path = if (Files.exists(this)) toRealPath() else this
 
     private fun checksum(sql: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(sql.toByteArray(StandardCharsets.UTF_8))
@@ -191,4 +311,9 @@ class SqlMigrator(
     companion object {
         private val FILE_PATTERN = Regex("""V(.+)__(.+)\.sql""", RegexOption.IGNORE_CASE)
     }
+
+    private data class ClasspathScriptSource(
+        val key: String,
+        val load: () -> List<MigrationScript>
+    )
 }

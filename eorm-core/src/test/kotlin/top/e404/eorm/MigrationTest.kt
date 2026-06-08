@@ -4,8 +4,13 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
+import top.e404.eorm.migration.SqlMigrator
 import top.e404.eorm.migration.SqlScriptParser
+import java.net.URLClassLoader
+import java.nio.charset.StandardCharsets
 import java.nio.file.Path
+import java.util.jar.JarEntry
+import java.util.jar.JarOutputStream
 import kotlin.io.path.writeText
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -94,11 +99,92 @@ class MigrationTest : BaseTest() {
     }
 
     @Test
+    fun `sql script parser keeps semicolons inside postgresql dollar quoted blocks`() {
+        val statements = SqlScriptParser.splitStatements(
+            """
+            CREATE TABLE parser_test(id BIGINT, text VARCHAR(100));
+            DO $$
+            BEGIN
+                INSERT INTO parser_test(id, text) VALUES (1, 'a;b');
+                INSERT INTO parser_test(id, text) VALUES (2, 'c');
+            END $$;
+            CREATE FUNCTION parser_fn() RETURNS TEXT AS ${'$'}tag${'$'}
+            BEGIN
+                RETURN 'x;y';
+            END;
+            ${'$'}tag${'$'} LANGUAGE plpgsql;
+            INSERT INTO parser_test(id, text) VALUES (3, 'after');
+            """.trimIndent()
+        )
+
+        assertEquals(4, statements.size)
+        assertTrue(statements[1].startsWith("DO $$"))
+        assertTrue(statements[1].contains("VALUES (1, 'a;b');"))
+        assertTrue(statements[2].contains("${'$'}tag${'$'}"))
+        assertTrue(statements[2].contains("RETURN 'x;y';"))
+    }
+
+    @Test
+    fun `migrator loads classpath location from jar resource directory`() {
+        val jar = migrationDir.resolve("migration.jar")
+        writeMigrationJar(jar, includeDirectoryEntry = true)
+
+        URLClassLoader(arrayOf(jar.toUri().toURL()), null).use { classLoader ->
+            val result = SqlMigrator(db, classLoader)
+                .locations("classpath:db/migration")
+                .migrate()
+
+            assertEquals(listOf("1", "2"), result.applied.map { it.version })
+            assertTrue(result.skipped.isEmpty())
+            assertEquals(2, db.executor.queryMap("SELECT * FROM migration_user", emptyList()).size)
+        }
+    }
+
+    @Test
+    fun `migrator loads classpath location from jar without directory entry`() {
+        val jar = migrationDir.resolve("migration_without_directory.jar")
+        writeMigrationJar(jar, includeDirectoryEntry = false)
+
+        URLClassLoader(arrayOf(jar.toUri().toURL()), null).use { classLoader ->
+            val result = SqlMigrator(db, classLoader)
+                .locations("classpath:db/migration")
+                .migrate()
+
+            assertEquals(listOf("1", "2"), result.applied.map { it.version })
+            assertTrue(result.skipped.isEmpty())
+            assertEquals(2, db.executor.queryMap("SELECT * FROM migration_user", emptyList()).size)
+        }
+    }
+
+    @Test
     fun `migrator rejects invalid file names`() {
         migrationDir.resolve("001_create_bad.sql").writeText("SELECT 1;")
 
         assertThrows<IllegalArgumentException> {
             db.migrator().locations(migrationDir.toString()).migrate()
+        }
+    }
+
+    private fun writeMigrationJar(jar: Path, includeDirectoryEntry: Boolean) {
+        JarOutputStream(jar.toFile().outputStream()).use { output ->
+            if (includeDirectoryEntry) {
+                output.putNextEntry(JarEntry("db/migration/"))
+                output.closeEntry()
+            }
+            output.putNextEntry(JarEntry("db/migration/V2__insert_jar_user.sql"))
+            output.write("INSERT INTO migration_user(id, name) VALUES (2, 'Jar Bob');".toByteArray(StandardCharsets.UTF_8))
+            output.closeEntry()
+            output.putNextEntry(JarEntry("db/migration/V1__create_jar_user.sql"))
+            output.write(
+                """
+                CREATE TABLE migration_user (
+                    id BIGINT PRIMARY KEY,
+                    name VARCHAR(50)
+                );
+                INSERT INTO migration_user(id, name) VALUES (1, 'Jar Alice');
+                """.trimIndent().toByteArray(StandardCharsets.UTF_8)
+            )
+            output.closeEntry()
         }
     }
 }

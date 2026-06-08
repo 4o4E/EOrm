@@ -465,3 +465,4 @@ db.migrator()
 ```
 
 迁移会自动创建 `eorm_schema_history` 历史表，按版本顺序执行脚本，并用 SHA-256 checksum 防止已执行脚本被修改。单个脚本可以包含多条 SQL，执行器会按分号拆分，同时避开字符串和注释里的分号。
+`classpath:` 目录支持开发期文件目录和生产 jar 内资源目录。PostgreSQL 的 dollar-quoted block（例如 `DO $$ ... $$;` 和 `$tag$ ... $tag$;`）会作为单条语句处理，块内部的分号不会触发拆分。
